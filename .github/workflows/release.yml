@@ -20,7 +20,7 @@ jobs:
             platform: linux-x64
           - os: windows-latest
             platform: windows-x64
-          - os: macos-13          # Intel Macs
+          - os: macos-15-intel    # Intel Macs (macos-13 has been retired by GitHub)
             platform: macos-x64
           - os: macos-latest      # Apple Silicon Macs
             platform: macos-arm64
