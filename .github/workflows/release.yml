@@ -22,8 +22,6 @@ jobs:
             platform: windows-x64
           - os: macos-15-intel    # Intel Macs (macos-13 has been retired by GitHub)
             platform: macos-x64
-          - os: macos-latest      # Apple Silicon Macs
-            platform: macos-arm64
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
