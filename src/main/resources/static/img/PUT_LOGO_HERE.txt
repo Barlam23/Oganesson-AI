@@ -1,0 +1,10 @@
+Put your logo in this folder and name it:   logo.png
+
+It is used in two places:
+  - in the top-left corner of the app, in place of the "O" tile
+  - as the icon in the browser tab
+
+Tips:
+  - A square PNG works best (for example 256 x 256 or 512 x 512). Transparent backgrounds are fine.
+  - After adding or replacing the file, refresh the page (Ctrl+F5 / Cmd+Shift+R) so the browser tab icon updates.
+  - If there is no logo.png, the app keeps showing the "O" tile. You can delete this text file.

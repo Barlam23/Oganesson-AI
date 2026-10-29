@@ -1,0 +1,8 @@
+bin/
+out/
+oganesson_data.json
+oganesson_data.json.bak
+oganesson_data.json.tmp
+oganesson_data.json.bak.tmp
+dist/
+build/

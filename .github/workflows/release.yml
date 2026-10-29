@@ -1,0 +1,74 @@
+name: Build apps
+
+# Runs on every "v*" tag (for example v1.0.0). Builds the apps on each OS and attaches them to a GitHub Release.
+# You can also run it by hand from the Actions tab; a manual run builds the artifacts but publishes nothing.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: linux-x64
+          - os: windows-latest
+            platform: windows-x64
+          - os: macos-13          # Intel Macs
+            platform: macos-x64
+          - os: macos-latest      # Apple Silicon Macs
+            platform: macos-arm64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Work out the version number
+        id: version
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+            echo "value=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=1.0.0" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build
+        shell: bash
+        run: scripts/build-app.sh "${{ steps.version.outputs.value }}" "${{ matrix.platform }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.platform }}
+          path: dist/OganessonAI-*
+          if-no-files-found: error
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --title "Oganesson AI $GITHUB_REF_NAME" \
+            --generate-notes
