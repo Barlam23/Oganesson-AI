@@ -5,6 +5,7 @@
  */
 
 const DEFAULT_API_URL = "http://localhost:1234/v1/chat/completions";
+const DEFAULT_OLLAMA_URL = "http://localhost:11434/v1/chat/completions";
 const DEFAULT_HUE = 268;
 
 // Where each avatar picker lives in the page.
@@ -17,7 +18,19 @@ const LOGO_URL = '/img/logo.png';
 
 // Reasoning tokens count against max_tokens too. When thinking is on, this extra room keeps a short reply
 // from being cut off (or left empty) because the model spent its budget on thinking.
-const REASONING_TOKEN_HEADROOM = 4096;
+const REASONING_TOKEN_HEADROOM = 2048;
+
+// Chat memory: how many estimated tokens of conversation (plus the system prompt) are sent with each request.
+// The oldest turns are dropped first; the system prompt and the newest message are always sent.
+const DEFAULT_CONTEXT_TOKENS = 2048;
+const CONTEXT_TOKEN_RANGE = { min: 1024, max: 8192, step: 512 };
+// Room kept for the reply itself: the longest reply preset (novel, 6144) plus the reasoning headroom (2048).
+const REPLY_TOKEN_RESERVE = 8192;
+
+// Rough token estimate. Three characters per token is deliberately pessimistic, so non-English text fits too.
+function estimateTokens(text) {
+    return Math.ceil(String(text || '').length / 3);
+}
 
 // Reply-length presets. The instructions do the real work; maxTokens is only a safety net so a reply can never run away.
 const DEFAULT_LENGTH = 'medium';
@@ -42,6 +55,13 @@ const RESPONSE_LENGTHS = {
         rule: 'Write a LONG, immersive reply: several detailed paragraphs. Describe setting, body language, and inner thoughts when it helps the scene. Do not outline or number paragraphs in advance; just write the scene.',
         brief: 'several detailed paragraphs',
         maxTokens: 4096
+    },
+    novel: {
+        label: 'novel',
+        hint: 'A long, novel-style passage of many paragraphs (about 700 to 1,000 words).',
+        rule: 'Write a NOVEL-LENGTH reply: a long, richly developed passage of many paragraphs, with the pacing of a chapter. Expand on setting, atmosphere, body language, inner thoughts and dialogue. Do not outline or number paragraphs; just write the scene in full.',
+        brief: 'a long, novel-style passage of many paragraphs',
+        maxTokens: 6144
     }
 };
 
@@ -60,7 +80,7 @@ const app = {
     defaultServerError: "LM Studio server is not running!",
     data: {
         bots: [],
-        settings: { lmStudioUrl: DEFAULT_API_URL, model: "" },
+        settings: { provider: 'lmstudio', lmStudioUrl: DEFAULT_API_URL, lmStudioModel: '', ollamaUrl: DEFAULT_OLLAMA_URL, ollamaModel: '', contextTokens: DEFAULT_CONTEXT_TOKENS },
         userProfile: { name: "User", desc: "", gender: "", pronouns: "", avatar: "" },
         personas: [],
         activePersonaId: null
@@ -90,6 +110,9 @@ const app = {
     arrowFrame: 0,
     draftLength: DEFAULT_LENGTH,
     draftThinking: true,
+    draftProvider: 'lmstudio',
+    providerDrafts: null,
+    draftContext: DEFAULT_CONTEXT_TOKENS,
     chatEpochs: new WeakMap(),
     overviewGreetingIndex: 0,
     pendingGreeting: null,
@@ -97,7 +120,23 @@ const app = {
 
     /* ============================== startup ============================== */
 
+    // Closing the page closes the app. The server waits a few seconds before stopping, so a reload or another
+    // open tab can cancel the stop. Saves are written as each change happens, so nothing is lost.
+    bindPageLifecycle() {
+        const presence = typeof BroadcastChannel === 'function' ? new BroadcastChannel('oganesson-presence') : null;
+        if (presence) {
+            // Another tab is closing: this tab is still here, so tell the server to keep running.
+            presence.onmessage = () => fetch('/api/alive', { method: 'POST' }).catch(() => {});
+        }
+        window.addEventListener('pagehide', (event) => {
+            if (event.persisted) return;   // the page may come back from the back/forward cache
+            if (presence) presence.postMessage('closing');
+            navigator.sendBeacon('/api/closing');
+        });
+    },
+
     async init() {
+        this.bindPageLifecycle();
         document.addEventListener('input', (event) => {
             if (event.target instanceof HTMLTextAreaElement && event.target.hasAttribute('data-autogrow')) {
                 this.autoGrow(event.target);
@@ -171,6 +210,14 @@ const app = {
             });
         }
 
+        const providerBubbles = document.getElementById('provider-bubbles');
+        providerBubbles.addEventListener('click', (event) => {
+            const bubble = event.target.closest('[data-provider]');
+            if (bubble) this.selectProviderTab(bubble.dataset.provider);
+        });
+        document.getElementById('setting-api-url').addEventListener('input', () => this.syncProviderDraftFromFields());
+        document.getElementById('setting-model').addEventListener('input', () => this.syncProviderDraftFromFields());
+
         const lengthGroup = document.getElementById('setting-length');
         lengthGroup.addEventListener('click', (event) => {
             const option = event.target.closest('[data-length]');
@@ -188,6 +235,14 @@ const app = {
 
         const thinkingSwitch = document.getElementById('setting-thinking');
         thinkingSwitch.addEventListener('click', () => this.renderThinkingSetting(!this.draftThinking));
+
+        const contextSlider = document.getElementById('setting-context');
+        const contextWrap = document.getElementById('setting-context-wrap');
+        contextSlider.addEventListener('input', () => this.updateContextReadout());
+        contextSlider.addEventListener('pointerdown', () => contextWrap.classList.add('is-dragging'));
+        const endContextDrag = () => contextWrap.classList.remove('is-dragging');
+        window.addEventListener('pointerup', endContextDrag);
+        window.addEventListener('pointercancel', endContextDrag);
 
         const picker = document.getElementById('greeting-picker');
         picker.addEventListener('click', (event) => {
@@ -264,8 +319,21 @@ const app = {
         notification.addEventListener('mouseleave', () => this.resumeNotificationTimer());
     },
 
+    // The saved provider decides the server, its endpoint, and its model name.
+    providerConfig() {
+        const s = this.data.settings;
+        if (s.provider === 'ollama') {
+            return { label: 'Ollama', url: (s.ollamaUrl || '').trim() || DEFAULT_OLLAMA_URL, model: (s.ollamaModel || '').trim() };
+        }
+        return { label: 'LM Studio', url: (s.lmStudioUrl || '').trim() || this.defaultApiUrl, model: (s.lmStudioModel || '').trim() };
+    },
+
     currentEndpoint() {
-        return (this.data.settings.lmStudioUrl || '').trim() || this.defaultApiUrl;
+        return this.providerConfig().url;
+    },
+
+    currentModel() {
+        return this.providerConfig().model;
     },
 
     async checkServerStatus() {
@@ -273,8 +341,12 @@ const app = {
         try {
             await fetch(this.currentEndpoint(), { method: 'HEAD', signal: AbortSignal.timeout(3000) });
         } catch (error) {
-            this.showErrorNotification();
+            this.showErrorNotification(`${this.serverName()} server is not running!`);
         }
+    },
+
+    serverName() {
+        return this.providerConfig().label;
     },
 
     /* ============================ notification ============================ */
@@ -374,8 +446,15 @@ const app = {
             }
 
             this.data = loaded;
-            this.data.settings = Object.assign({ lmStudioUrl: this.defaultApiUrl, model: '', responseLength: DEFAULT_LENGTH, thinking: true }, loaded.settings);
+            const rawSettings = loaded.settings || {};
+            this.data.settings = Object.assign({ provider: 'lmstudio', lmStudioUrl: this.defaultApiUrl, lmStudioModel: '', ollamaUrl: DEFAULT_OLLAMA_URL, ollamaModel: '', responseLength: DEFAULT_LENGTH, thinking: true, contextTokens: DEFAULT_CONTEXT_TOKENS }, rawSettings);
+            if (!('provider' in rawSettings)) this.migrateLegacySettings(this.data.settings, rawSettings);
+            delete this.data.settings.model;   // older single model name, now kept per server
+            if (this.data.settings.provider !== 'ollama') this.data.settings.provider = 'lmstudio';
+            if (!(this.data.settings.lmStudioUrl || '').trim()) this.data.settings.lmStudioUrl = this.defaultApiUrl;
+            if (!(this.data.settings.ollamaUrl || '').trim()) this.data.settings.ollamaUrl = DEFAULT_OLLAMA_URL;
             if (!RESPONSE_LENGTHS[this.data.settings.responseLength]) this.data.settings.responseLength = DEFAULT_LENGTH;
+            this.data.settings.contextTokens = this.clampContextTokens(this.data.settings.contextTokens);
             if (typeof this.data.settings.thinking !== 'boolean') this.data.settings.thinking = true;
             this.data.userProfile = Object.assign({ name: 'User', desc: '', gender: '', pronouns: '', avatar: '' }, loaded.userProfile || {});
             if (this.isGeneratedAvatarUrl(this.data.userProfile.avatar)) this.data.userProfile.avatar = '';
@@ -390,10 +469,11 @@ const app = {
         }
         this.renderUserProfile();
         this.renderCharacterGallery();
-        this.setFieldValue('setting-api-url', this.data.settings.lmStudioUrl);
-        this.setFieldValue('setting-model', this.data.settings.model || '');
+        this.loadProviderDrafts();
+        this.renderProviderSetting(this.data.settings.provider);
         this.renderLengthSetting(this.data.settings.responseLength);
         this.renderThinkingSetting(this.thinkingEnabled());
+        this.renderContextSetting(this.data.settings.contextTokens);
     },
 
     normalizeCharacterData(character) {
@@ -509,10 +589,11 @@ const app = {
         } else if (viewId === 'user-profile') {
             this.renderUserProfile();
         } else if (viewId === 'settings') {
-            this.setFieldValue('setting-api-url', this.data.settings.lmStudioUrl || this.defaultApiUrl);
-            this.setFieldValue('setting-model', this.data.settings.model || '');
+            this.loadProviderDrafts();
+            this.renderProviderSetting(this.data.settings.provider);
             this.renderLengthSetting(this.data.settings.responseLength);
             this.renderThinkingSetting(this.thinkingEnabled());
+            this.renderContextSetting(this.data.settings.contextTokens);
         } else if (viewId === 'overview') {
             this.renderCharacterOverview();
         }
@@ -2511,14 +2592,29 @@ const app = {
         }
 
         const system = this.buildSystemPrompt(character);
+        const recent = this.fitTurnsToBudget(turns, estimateTokens(system));
         if (!strict) {
-            return [{ role: 'system', content: system }, ...turns];
+            return [{ role: 'system', content: system }, ...recent];
         }
         // Strict form for templates that reject a system role: fold it into a leading user turn.
         return this.mergeConsecutiveTurns([
             { role: 'user', content: system + '\n\n(The roleplay begins now.)' },
-            ...turns
+            ...recent
         ]);
+    },
+
+    // Keeps the most recent turns that fit the budget. The opening greeting and the oldest messages go first.
+    // The newest turn is always kept, even when it alone is over budget.
+    fitTurnsToBudget(turns, systemTokens) {
+        let remaining = this.promptBudget() - systemTokens;
+        const kept = [];
+        for (let i = turns.length - 1; i >= 0; i--) {
+            const cost = estimateTokens(turns[i].content);
+            if (kept.length > 0 && cost > remaining) break;
+            kept.unshift(turns[i]);
+            remaining -= cost;
+        }
+        return kept;
     },
 
     mergeConsecutiveTurns(turns) {
@@ -2546,7 +2642,7 @@ const app = {
             stream: true
         };
         // LM Studio uses whichever model is loaded; servers such as Ollama need an explicit name.
-        const model = (this.data.settings.model || '').trim();
+        const model = this.currentModel();
         if (model) payload.model = model;
 
         // Best-effort. Servers that don't understand thinking ignore these; the settings hint says so.
@@ -2592,7 +2688,7 @@ const app = {
     formatStreamError(error) {
         if (error && error.isApiError) {
             let message = '⚠️ API error' + (error.status ? ' (HTTP ' + error.status + ')' : '') + (error.detail ? ': ' + error.detail : '.');
-            if (/model/i.test(error.detail) && !(this.data.settings.model || '').trim()) {
+            if (/model/i.test(error.detail) && !this.currentModel()) {
                 message += ' Tip: set the model name in Settings.';
             }
             return message;
@@ -2795,15 +2891,20 @@ const app = {
     /* ============================== settings & profile ============================== */
 
     persistApiSettings() {
-        const endpointUrl = this.getFieldValue('setting-api-url').trim();
-        if (!endpointUrl) {
+        this.syncProviderDraftFromFields();
+        const drafts = this.providerDrafts;
+        if (!drafts[this.draftProvider].url.trim()) {
             this.showErrorNotification('Please enter the local server endpoint URL.');
             return;
         }
-        this.data.settings.lmStudioUrl = endpointUrl;
-        this.data.settings.model = this.getFieldValue('setting-model').trim();
+        this.data.settings.provider = this.draftProvider;
+        this.data.settings.lmStudioUrl = drafts.lmstudio.url.trim() || this.defaultApiUrl;
+        this.data.settings.lmStudioModel = drafts.lmstudio.model.trim();
+        this.data.settings.ollamaUrl = drafts.ollama.url.trim() || DEFAULT_OLLAMA_URL;
+        this.data.settings.ollamaModel = drafts.ollama.model.trim();
         this.data.settings.responseLength = RESPONSE_LENGTHS[this.draftLength] ? this.draftLength : DEFAULT_LENGTH;
         this.data.settings.thinking = !!this.draftThinking;
+        this.data.settings.contextTokens = this.clampContextTokens(this.draftContext);
         this.strictRoleMode = false;   // the server or model may have changed, so detect its quirks again
         this.persistApplicationData().then((saved) => {
             if (saved) {
@@ -2816,31 +2917,6 @@ const app = {
     },
 
     // Saves a copy of all characters, chats and settings as a file. Nothing is sent anywhere.
-    // Stops the local server (the app is then closed; reopen it to continue). Data is saved first.
-    async quitServer() {
-        const ok = await this.askConfirm({
-            title: 'Quit Oganesson AI?',
-            message: 'The local server stops and the app closes. Your characters and chats are saved first.',
-            confirmLabel: 'Quit'
-        });
-        if (!ok) return;
-        try {
-            const saved = await this.persistApplicationData();
-            if (!saved) throw new Error('save failed');
-            await fetch('/api/shutdown', { method: 'POST' });
-        } catch (error) {
-            this.showErrorNotification('Could not quit cleanly. Your last save may not be complete.');
-            return;
-        }
-        document.body.innerHTML = `
-            <div style="min-height:100vh;display:flex;align-items:center;justify-content:center;background:#05060b;color:#e5e7eb;font-family:system-ui,sans-serif;text-align:center;padding:24px">
-                <div>
-                    <p style="font-size:22px;font-weight:700;margin:0 0 8px">Oganesson AI has stopped.</p>
-                    <p style="color:#9ca3af;margin:0">You can close this tab. Open the app again to continue.</p>
-                </div>
-            </div>`;
-    },
-
     downloadBackup() {
         if (!this.dataLoaded) {
             this.showErrorNotification('Your data is not loaded, so there is nothing to back up yet.');
@@ -2861,6 +2937,76 @@ const app = {
         return RESPONSE_LENGTHS[this.data.settings.responseLength] || RESPONSE_LENGTHS[DEFAULT_LENGTH];
     },
 
+    // Saves from before the provider tabs had one endpoint and one model name. Its URL decides which server it was.
+    migrateLegacySettings(settings, raw) {
+        const legacyUrl = String(raw.lmStudioUrl || '').trim();
+        const legacyModel = String(raw.model || '').trim();
+        let onOllama = false;
+        try { onOllama = new URL(legacyUrl).port === '11434'; } catch (error) { onOllama = false; }
+        if (onOllama) {
+            settings.provider = 'ollama';
+            settings.ollamaUrl = legacyUrl;
+            settings.ollamaModel = legacyModel;
+            settings.lmStudioUrl = this.defaultApiUrl;
+            settings.lmStudioModel = '';
+        } else {
+            settings.provider = 'lmstudio';
+            settings.lmStudioUrl = legacyUrl || this.defaultApiUrl;
+            settings.lmStudioModel = legacyModel;
+        }
+    },
+
+    // Each server keeps its own endpoint and model name while the tabs are used. Nothing is saved until Save Settings.
+    loadProviderDrafts() {
+        const s = this.data.settings;
+        this.providerDrafts = {
+            lmstudio: { url: s.lmStudioUrl || this.defaultApiUrl, model: s.lmStudioModel || '' },
+            ollama: { url: s.ollamaUrl || DEFAULT_OLLAMA_URL, model: s.ollamaModel || '' }
+        };
+    },
+
+    syncProviderDraftFromFields() {
+        if (!this.providerDrafts) this.loadProviderDrafts();
+        const draft = this.providerDrafts[this.draftProvider];
+        draft.url = this.getFieldValue('setting-api-url');
+        draft.model = this.getFieldValue('setting-model');
+    },
+
+    selectProviderTab(provider) {
+        this.syncProviderDraftFromFields();
+        this.renderProviderSetting(provider);
+    },
+
+    renderProviderSetting(provider) {
+        if (!this.providerDrafts) this.loadProviderDrafts();
+        this.draftProvider = provider === 'ollama' ? 'ollama' : 'lmstudio';
+
+        const track = document.querySelector('#provider-bubbles .provider-bubble-track');
+        if (track) track.dataset.provider = this.draftProvider;
+
+        document.querySelectorAll('#provider-bubbles [data-provider]').forEach((bubble) => {
+            const selected = bubble.dataset.provider === this.draftProvider;
+            bubble.setAttribute('aria-selected', selected ? 'true' : 'false');
+            bubble.tabIndex = selected ? 0 : -1;
+        });
+
+        const draft = this.providerDrafts[this.draftProvider];
+        this.setFieldValue('setting-api-url', draft.url);
+        this.setFieldValue('setting-model', draft.model);
+
+        // LM Studio does not need a model name; Ollama does. Animate the field in/out smoothly.
+        const modelWrap = document.getElementById('setting-model-wrap');
+        if (modelWrap) {
+            const showModel = this.draftProvider === 'ollama';
+            modelWrap.dataset.visible = showModel ? 'true' : 'false';
+            const modelInput = document.getElementById('setting-model');
+            if (modelInput) {
+                modelInput.tabIndex = showModel ? 0 : -1;
+                modelInput.setAttribute('aria-hidden', showModel ? 'false' : 'true');
+            }
+        }
+    },
+
     // Shows which option is selected (it is only saved when "Save Settings" is pressed).
     renderLengthSetting(key) {
         this.draftLength = RESPONSE_LENGTHS[key] ? key : DEFAULT_LENGTH;
@@ -2875,6 +3021,46 @@ const app = {
 
     thinkingEnabled() {
         return this.data.settings.thinking !== false;
+    },
+
+    clampContextTokens(value) {
+        const { min, max, step } = CONTEXT_TOKEN_RANGE;
+        const number = Number(value);
+        if (!Number.isFinite(number)) return DEFAULT_CONTEXT_TOKENS;
+        return Math.min(max, Math.max(min, Math.round(number / step) * step));
+    },
+
+    promptBudget() {
+        return this.clampContextTokens(this.data.settings.contextTokens);
+    },
+
+    // Context window the server needs for a given amount of chat memory: the history plus room for the reply.
+    contextWindow(historyTokens) {
+        return historyTokens + REPLY_TOKEN_RESERVE;
+    },
+
+    renderContextSetting(tokens) {
+        this.draftContext = this.clampContextTokens(tokens);
+        const slider = document.getElementById('setting-context');
+        if (!slider) return;
+        slider.value = String(this.draftContext);
+        this.updateContextReadout();
+    },
+
+    // Runs on every change, so the value and the tooltip update while the user slides.
+    updateContextReadout() {
+        const slider = document.getElementById('setting-context');
+        if (!slider) return;
+        const { min, max } = CONTEXT_TOKEN_RANGE;
+        const tokens = Number(slider.value);
+        this.draftContext = tokens;
+        const window = this.contextWindow(tokens);
+        const position = (tokens - min) / (max - min);
+        slider.style.setProperty('--fill', (position * 100).toFixed(2) + '%');
+        document.getElementById('setting-context-wrap').style.setProperty('--p', position.toFixed(4));
+        document.getElementById('setting-context-value').textContent = tokens.toLocaleString() + ' tokens';
+        document.getElementById('setting-context-tip-history').textContent = tokens.toLocaleString() + ' tokens of history';
+        document.getElementById('setting-context-tip-window').textContent = 'context length ' + window.toLocaleString() + ' tokens';
     },
 
     renderThinkingSetting(enabled) {

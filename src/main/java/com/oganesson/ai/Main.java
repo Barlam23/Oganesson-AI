@@ -24,6 +24,9 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 
 public class Main {
 
@@ -32,6 +35,18 @@ public class Main {
 
     /** True when running from a packaged app (see scripts/build-app.sh), where the install folder is read-only. */
     private static final boolean PACKAGED = Boolean.getBoolean("oganesson.packaged");
+
+    /**
+     * When the page is closed the server stops after this delay. A reload, or another open tab, makes a request
+     * during the delay, which cancels the stop. Every save is written to disk as it happens, so nothing is lost.
+     */
+    private static final long CLOSE_GRACE_MS = 3000;
+    private static final ScheduledExecutorService closeTimer = Executors.newSingleThreadScheduledExecutor(task -> {
+        Thread thread = new Thread(task, "close-timer");
+        thread.setDaemon(true);
+        return thread;
+    });
+    private static ScheduledFuture<?> pendingStop;
 
     public static void main(String[] args) throws IOException {
         Path baseDir = PACKAGED ? userDataDir() : locateBaseDir();
@@ -55,30 +70,31 @@ public class Main {
         }
 
         Filter guard = new LocalRequestGuard(PORT);
+        Filter keepAlive = new KeepAliveFilter();
         HttpContext ui = server.createContext("/", new UIHandler(baseDir));
         HttpContext data = server.createContext("/api/data", new DataHandler(baseDir.resolve(DATA_FILE)));
-        HttpContext quit = server.createContext("/api/shutdown", exchange -> {
-            // POST only, and the guard already rejects requests from any other website.
+        HttpContext alive = server.createContext("/api/alive", exchange -> {
+            exchange.sendResponseHeaders(204, -1);
+            exchange.close();
+        });
+        HttpContext closing = server.createContext("/api/closing", exchange -> {
+            // Sent by the page as it closes (navigator.sendBeacon, a POST). It answers at once, then starts the stop timer.
             if (!"POST".equals(exchange.getRequestMethod())) {
                 exchange.sendResponseHeaders(405, -1);
                 exchange.close();
                 return;
             }
-            byte[] body = "Stopped".getBytes(StandardCharsets.UTF_8);
-            exchange.sendResponseHeaders(200, body.length);
-            try (OutputStream os = exchange.getResponseBody()) {
-                os.write(body);
-            }
-            // Stop after this response has gone out, so the page gets its answer.
-            new Thread(() -> {
-                try { Thread.sleep(300); } catch (InterruptedException ignored) { }
-                server.stop(0);
-                System.exit(0);
-            }, "shutdown").start();
+            exchange.sendResponseHeaders(204, -1);
+            exchange.close();
+            scheduleStop(server);
         });
         ui.getFilters().add(guard);
         data.getFilters().add(guard);
-        quit.getFilters().add(guard);
+        alive.getFilters().add(guard);
+        alive.getFilters().add(keepAlive);
+        ui.getFilters().add(keepAlive);
+        data.getFilters().add(keepAlive);
+        closing.getFilters().add(guard);
 
         server.setExecutor(Executors.newCachedThreadPool());
         server.start();
@@ -88,12 +104,42 @@ public class Main {
         System.out.println(" 🔮 Oganesson AI Server Ready!");
         System.out.println(" 🌐 Open browser at: " + url);
         System.out.println(" 💾 Data saved in: " + baseDir.resolve(DATA_FILE));
-        if (PACKAGED) System.out.println(" ⏻  Quit from Settings in the app.");
         System.out.println("=====================================================");
 
         boolean skipBrowser = args.length > 0 && "--no-browser".equals(args[0]);
         if (!skipBrowser) {
             launchSystemBrowser(url);
+        }
+    }
+
+    private static synchronized void scheduleStop(HttpServer server) {
+        cancelStop();
+        pendingStop = closeTimer.schedule(() -> {
+            server.stop(0);
+            System.exit(0);
+        }, CLOSE_GRACE_MS, TimeUnit.MILLISECONDS);
+    }
+
+    private static synchronized void cancelStop() {
+        if (pendingStop != null) {
+            pendingStop.cancel(false);
+            pendingStop = null;
+        }
+    }
+
+    /** Any request other than the page-closed signal means the app is still in use, so a pending stop is cancelled. */
+    private static final class KeepAliveFilter extends Filter {
+        @Override
+        public void doFilter(HttpExchange exchange, Chain chain) throws IOException {
+            if (!"/api/closing".equals(exchange.getRequestURI().getPath())) {
+                cancelStop();
+            }
+            chain.doFilter(exchange);
+        }
+
+        @Override
+        public String description() {
+            return "Cancels a pending stop while the app is in use";
         }
     }
 

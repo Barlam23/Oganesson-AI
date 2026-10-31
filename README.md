@@ -3,6 +3,20 @@
 A local character-chat app. You create characters, write opening messages, and chat with them through a language
 model that runs on your own computer. Everything stays on your machine.
 
+## Requirements
+
+Oganesson AI does not include a language model. Install one of these and keep it running on your computer:
+
+- **LM Studio** (https://lmstudio.ai): load a model and keep the default endpoint.
+- **Ollama** (https://ollama.com): pull a model, then use the Ollama endpoint in Settings (see *Connect a model*).
+
+Any other server with an OpenAI-compatible chat endpoint also works.
+
+Set the context length to **10,240 tokens** in LM Studio (model settings, *Context Length*) or Ollama (the
+`OLLAMA_CONTEXT_LENGTH` environment variable). This is enough for the default **Chat memory** setting and the **Novel** response length. If you change
+Chat memory in Settings, set the context length to the window the slider shows. Larger values use more memory, which
+can crash machines with low RAM.
+
 ## Privacy
 
 Oganesson AI is built around privacy. **We do not collect any data.** There are no accounts, no analytics, no
@@ -21,12 +35,12 @@ Ready-to-run apps are on the [Releases](../../releases) page. Java does not need
 
 - **Windows:** unzip `OganessonAI-windows-x64.zip` and run `OganessonAI.exe`. SmartScreen may warn about an unknown
   publisher. Click *More info*, then *Run anyway*.
-- **macOS:** unzip the file for your Mac (`macos-arm64` for Apple Silicon, `macos-x64` for Intel) and drag
-  `OganessonAI.app` to Applications. The first time, right-click it and choose *Open*. If macOS still refuses, run
+- **macOS (Intel):** unzip `OganessonAI-macos-x64.zip` and drag `OganessonAI.app` to Applications. The first time,
+  right-click it and choose *Open*. If macOS still refuses, run
   `xattr -dr com.apple.quarantine /Applications/OganessonAI.app` in Terminal once.
 - **Linux:** extract `OganessonAI-linux-x64.tar.gz` and run `OganessonAI/bin/OganessonAI`.
 
-The app opens in your browser. To stop it, use **Settings → Quit Oganesson AI**.
+The app opens in your browser. Closing the browser tab stops it. Open the app again to continue; your data is saved as you go.
 
 ## Run from source
 
@@ -47,12 +61,12 @@ The app opens at http://localhost:6677. Add `--no-browser` to skip opening the b
 
 ## Connect a model
 
-Open **Settings** and set the endpoint. The default is `http://localhost:1234/v1/chat/completions`, which matches
-LM Studio.
+Open **Settings** and choose **LM Studio** or **Ollama** at the top. Each tab has its own endpoint and model name,
+and the one you choose is used when you press **Save Settings**. The LM Studio endpoint is
+`http://localhost:1234/v1/chat/completions` and the Ollama endpoint is `http://localhost:11434/v1/chat/completions`.
 
 - **LM Studio:** keep the default endpoint and load a model in LM Studio. The app uses whichever model is loaded.
-- **Ollama:** use `http://localhost:11434/v1/chat/completions` and fill in **Model Name** with the model you have
-  pulled.
+- **Ollama:** fill in **Model Name** with the model you have pulled.
 - **Other servers** (llama.cpp and similar): use their OpenAI-compatible chat endpoint.
 
 The **Thinking** switch asks reasoning models to think before they answer. Servers that do not support it ignore it.

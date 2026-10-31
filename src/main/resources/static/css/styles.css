@@ -143,20 +143,23 @@ body {
     transform: scale(1.12);
 }
 
-/* Discord: the logo does a short wiggle on hover, like the other header icons */
+/* Discord: the logo tilts and lifts on hover. A transition (not a keyframe animation) means that leaving early
+   reverses smoothly from wherever the logo is, instead of freezing and snapping back. */
 .discord-icon {
-    transition: transform 0.3s ease;
+    transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1);   /* the way back: a smooth ease-out, no bounce */
 }
-@keyframes discordWiggle {
-    0%   { transform: none; }
-    20%  { transform: translateY(-2px) rotate(-10deg); }
-    45%  { transform: translateY(-1px) rotate(8deg); }
-    70%  { transform: rotate(-4deg); }
-    100% { transform: none; }
-}
-.group:hover .discord-icon,
 .btn-discord:hover .discord-icon {
-    animation: discordWiggle 0.6s cubic-bezier(0.36, 0.07, 0.19, 0.97);
+    transition: transform 0.55s cubic-bezier(0.34, 1.7, 0.64, 1);   /* the tilt: a small overshoot */
+    transform: translateY(-2px) rotate(-12deg);
+}
+
+/* GitHub: the mark tilts the other way and grows slightly on hover, with the same smooth return as Discord */
+.github-icon {
+    transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.btn-github:hover .github-icon {
+    transition: transform 0.55s cubic-bezier(0.34, 1.7, 0.64, 1);
+    transform: translateY(-2px) rotate(12deg) scale(1.08);
 }
 
 .navigation-home-icon {
@@ -214,6 +217,7 @@ body {
 .md-indigo  { --solid: #4f46e5; --tc: #c7d2fe; --tb: rgba(99, 102, 241, 0.20); }
 .md-neutral { --solid: #475569; --tc: #d1d5db; --tb: rgba(255, 255, 255, 0.07); }
 .md-blurple { --solid: #5865F2; --tc: #c9ccff; --tb: rgba(88, 101, 242, 0.22); }
+.md-github  { --solid: #24292f; --tc: #f3f4f6; --tb: rgba(255, 255, 255, 0.12); }
 
 .md-filled   { --c: #ffffff; --bg: var(--solid); }
 .md-tonal    { --c: var(--tc); --bg: var(--tb); }
@@ -459,7 +463,8 @@ body {
 @media (prefers-reduced-motion: reduce) {
     .md-ripple { display: none; }
     .md-btn, .md-icon-btn { transition: none; }
-    .discord-icon, .group:hover .discord-icon, .btn-discord:hover .discord-icon { animation: none; }
+    .discord-icon, .btn-discord:hover .discord-icon,
+    .github-icon, .btn-github:hover .github-icon { transition: none; transform: none; }
 }
 
 @media (max-width: 480px) {
@@ -630,8 +635,7 @@ button.md-btn.create-pill:hover::after { transform: translateX(120%); }
 .msg-tools-right { right: -5rem; }
 .msg-tools-left  { left: -5rem; }
 .group:hover .msg-tools,
-.group:focus-within .msg-tools,
-.msg-tools:focus-within {
+.msg-tools:has(:focus-visible) {
     opacity: 1;
     pointer-events: auto;
     transform: none;
@@ -748,6 +752,196 @@ button.md-btn.create-pill:hover::after { transform: translateX(120%); }
     .gp-intro, .gp-card, .gp-card.is-selected .gp-card-check,
     #greeting-picker.is-leaving, #chat-messages.chat-enter, .msg-recv-in.opening-in { animation: none; }
     .gp-card, .gp-card:hover { transition: none; transform: none; }
+}
+
+/* ===== Chat memory slider: violet-to-pink track, with a tooltip above the thumb ===== */
+.context-slider {
+    position: relative;
+    padding-top: 56px;   /* room for the tooltip above the track */
+}
+.md-slider {
+    -webkit-appearance: none;
+    appearance: none;
+    display: block;
+    width: 100%;
+    height: 6px;
+    margin: 0;
+    border-radius: 9999px;
+    outline: none;
+    cursor: pointer;
+    background: linear-gradient(to right, #8b5cf6, #ec4899) 0 / var(--fill, 0%) 100% no-repeat,
+                rgba(255, 255, 255, 0.1);
+}
+.md-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 20px;
+    height: 20px;
+    border-radius: 9999px;
+    border: 3px solid #8b5cf6;
+    background: #ffffff;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+    transition: box-shadow 0.2s ease, transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.md-slider::-moz-range-thumb {
+    width: 14px;
+    height: 14px;
+    border-radius: 9999px;
+    border: 3px solid #8b5cf6;
+    background: #ffffff;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+    transition: box-shadow 0.2s ease, transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.md-slider::-moz-range-track { background: transparent; }
+.md-slider:hover::-webkit-slider-thumb,
+.md-slider:focus-visible::-webkit-slider-thumb {
+    box-shadow: 0 0 0 7px rgba(139, 92, 246, 0.22), 0 2px 8px rgba(0, 0, 0, 0.4);
+}
+.md-slider:hover::-moz-range-thumb,
+.md-slider:focus-visible::-moz-range-thumb {
+    box-shadow: 0 0 0 7px rgba(139, 92, 246, 0.22), 0 2px 8px rgba(0, 0, 0, 0.4);
+}
+.md-slider:active::-webkit-slider-thumb { transform: scale(1.15); cursor: grabbing; }
+.md-slider:active::-moz-range-thumb { transform: scale(1.15); cursor: grabbing; }
+
+/* the tooltip follows the thumb: --p is the thumb position from 0 to 1, set by the script */
+.context-tip {
+    position: absolute;
+    top: 0;
+    left: calc(10px + (100% - 20px) * var(--p, 0));
+    z-index: 5;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    padding: 8px 12px;
+    border-radius: 14px;
+    border: 1px solid rgba(139, 92, 246, 0.45);
+    background: rgba(14, 18, 30, 0.94);
+    box-shadow: 0 10px 26px rgba(0, 0, 0, 0.45);
+    color: #e5e7eb;
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 1.3;
+    white-space: nowrap;
+    pointer-events: none;
+    opacity: 0;
+    transform: translateX(-50%) translateY(6px) scale(0.96);
+    transition: opacity 0.18s ease, transform 0.25s cubic-bezier(0.16, 1, 0.3, 1), left 0.12s linear;
+}
+.context-tip::after {
+    content: "";
+    position: absolute;
+    left: 50%;
+    bottom: -5px;
+    width: 8px;
+    height: 8px;
+    background: rgba(14, 18, 30, 0.94);
+    border-right: 1px solid rgba(139, 92, 246, 0.45);
+    border-bottom: 1px solid rgba(139, 92, 246, 0.45);
+    transform: translateX(-50%) rotate(45deg);
+}
+.context-slider:hover .context-tip,
+.context-slider.is-dragging .context-tip,
+.md-slider:focus-visible ~ .context-tip {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0) scale(1);
+}
+@media (prefers-reduced-motion: reduce) {
+    .md-slider::-webkit-slider-thumb, .md-slider::-moz-range-thumb, .context-tip { transition: none; }
+    .context-tip { transform: translateX(-50%); }
+}
+
+/* ===== provider selector (Settings): pills in the app's gradient, with the same glow as the main button ===== */
+.provider-bubbles { width: 100%; }
+
+.provider-bubble-track {
+    position: relative;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    padding: 4px;
+    border-radius: 9999px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    box-shadow: 0 0 0 1px rgba(139, 92, 246, 0.08), 0 0 22px rgba(139, 92, 246, 0.12), 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+
+.provider-bubble-indicator {
+    position: absolute;
+    top: 4px;
+    bottom: 4px;
+    left: 4px;
+    width: calc(50% - 4px);
+    border-radius: 9999px;
+    background: linear-gradient(135deg, #8b5cf6 0%, #ec4899 50%, #f43f5e 100%);
+    box-shadow: 0 10px 25px -6px rgba(236, 72, 153, 0.5), 0 0 18px rgba(139, 92, 246, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.28);
+    pointer-events: none;
+    transform: translateX(0);
+    transition: transform 0.42s cubic-bezier(0.34, 1.3, 0.64, 1), box-shadow 0.3s ease;
+}
+.provider-bubble-track[data-provider="ollama"] .provider-bubble-indicator {
+    transform: translateX(100%);
+}
+
+.provider-bubble {
+    position: relative;
+    z-index: 1;
+    height: 40px;
+    padding: 0 16px;
+    border: 0;
+    border-radius: 9999px;
+    background: transparent;
+    color: #d1d5db;
+    font-family: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 1;
+    cursor: pointer;
+    user-select: none;
+    transition: color 0.28s ease, background-color 0.2s ease;
+}
+.provider-bubble:hover { color: #ffffff; background: rgba(255, 255, 255, 0.05); }
+.provider-bubble[aria-selected="true"] { color: #ffffff; background: transparent; }
+.provider-bubble:focus-visible { outline: 2px solid #a78bfa; outline-offset: 2px; }
+
+/* Settings never shifts sideways when the page gets a scrollbar (e.g. after choosing Ollama and its model field appears). */
+.view { scrollbar-gutter: stable both-edges; }
+
+/* Model name field: fade + slide so it never pops in or collapses abruptly */
+.setting-model-wrap {
+    display: grid;
+    grid-template-rows: 1fr;
+    opacity: 1;
+    transform: translateY(0);
+    transition:
+        grid-template-rows 0.36s cubic-bezier(0.22, 1, 0.36, 1),
+        opacity 0.28s ease,
+        transform 0.36s cubic-bezier(0.22, 1, 0.36, 1),
+        margin 0.36s cubic-bezier(0.22, 1, 0.36, 1);
+    overflow: hidden;
+}
+
+.setting-model-inner {
+    min-height: 0;
+    overflow: hidden;
+}
+
+.setting-model-wrap[data-visible="false"] {
+    grid-template-rows: 0fr;
+    opacity: 0;
+    transform: translateY(-10px);
+    margin-top: -0.5rem;
+    margin-bottom: -0.5rem;
+    pointer-events: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .provider-bubble-indicator {
+        transition: none;
+    }
+    .setting-model-wrap {
+        transition: none;
+    }
 }
 
 /* ===== reply versions: < 1/3 > under a regenerated message ===== */
