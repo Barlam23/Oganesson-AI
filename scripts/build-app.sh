@@ -27,6 +27,9 @@ jar --create --file build/input/oganesson.jar --main-class com.oganesson.ai.Main
 
 echo "==> Creating app image with jpackage"
 # -Doganesson.packaged=true makes the app keep its data in the user's profile folder.
+# java.net.http is the HTTP client the proxy uses. jdk.crypto.ec provides the elliptic-curve TLS that Claude, OpenAI and
+# the other providers negotiate. jpackage can miss it because nothing references it directly, and without it every
+# HTTPS request to an online provider would fail in the packaged app only.
 jpackage \
     --type app-image \
     --name "$APP_NAME" \
@@ -36,6 +39,7 @@ jpackage \
     --main-jar oganesson.jar \
     --main-class com.oganesson.ai.Main \
     --dest dist \
+    --add-modules java.net.http,jdk.crypto.ec \
     --java-options "-Doganesson.packaged=true"
 
 echo "==> Archiving"

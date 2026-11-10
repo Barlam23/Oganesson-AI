@@ -43,7 +43,7 @@ jobs:
 
       - name: Build
         shell: bash
-        run: scripts/build-app.sh "${{ steps.version.outputs.value }}" "${{ matrix.platform }}"
+        run: bash scripts/build-app.sh "${{ steps.version.outputs.value }}" "${{ matrix.platform }}"
 
       - uses: actions/upload-artifact@v4
         with:

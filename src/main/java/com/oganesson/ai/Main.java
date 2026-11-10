@@ -1,6 +1,7 @@
 package com.oganesson.ai;
 
 import com.oganesson.ai.handler.DataHandler;
+import com.oganesson.ai.handler.ProxyHandler;
 import com.oganesson.ai.handler.UIHandler;
 import com.sun.net.httpserver.Filter;
 import com.sun.net.httpserver.HttpContext;
@@ -33,20 +34,20 @@ public class Main {
     private static final int PORT = 6677;
     private static final String DATA_FILE = "oganesson_data.json";
 
-    /** True when running from a packaged app (see scripts/build-app.sh), where the install folder is read-only. */
-    private static final boolean PACKAGED = Boolean.getBoolean("oganesson.packaged");
-
     /**
-     * When the page is closed the server stops after this delay. A reload, or another open tab, makes a request
-     * during the delay, which cancels the stop. Every save is written to disk as it happens, so nothing is lost.
+     * When the last page closes the server stops after this delay. A reload, or another open tab, makes a request
+     * during the delay, which cancels the stop.
      */
-    private static final long CLOSE_GRACE_MS = 3000;
+    private static final long CLOSE_GRACE_MS = 1000;
     private static final ScheduledExecutorService closeTimer = Executors.newSingleThreadScheduledExecutor(task -> {
         Thread thread = new Thread(task, "close-timer");
         thread.setDaemon(true);
         return thread;
     });
     private static ScheduledFuture<?> pendingStop;
+
+    /** True when running from a packaged app (see scripts/build-app.sh), where the install folder is read-only. */
+    private static final boolean PACKAGED = Boolean.getBoolean("oganesson.packaged");
 
     public static void main(String[] args) throws IOException {
         Path baseDir = PACKAGED ? userDataDir() : locateBaseDir();
@@ -70,15 +71,15 @@ public class Main {
         }
 
         Filter guard = new LocalRequestGuard(PORT);
-        Filter keepAlive = new KeepAliveFilter();
         HttpContext ui = server.createContext("/", new UIHandler(baseDir));
         HttpContext data = server.createContext("/api/data", new DataHandler(baseDir.resolve(DATA_FILE)));
+        HttpContext proxy = server.createContext("/api/proxy", new ProxyHandler());
         HttpContext alive = server.createContext("/api/alive", exchange -> {
             exchange.sendResponseHeaders(204, -1);
             exchange.close();
         });
         HttpContext closing = server.createContext("/api/closing", exchange -> {
-            // Sent by the page as it closes (navigator.sendBeacon, a POST). It answers at once, then starts the stop timer.
+            // Sent by the page as it closes (navigator.sendBeacon, a POST). Answer, then start the stop timer.
             if (!"POST".equals(exchange.getRequestMethod())) {
                 exchange.sendResponseHeaders(405, -1);
                 exchange.close();
@@ -88,13 +89,18 @@ public class Main {
             exchange.close();
             scheduleStop(server);
         });
+        // Any other request means the app is still in use, so a pending stop is cancelled.
+        Filter keepAlive = new KeepAliveFilter();
         ui.getFilters().add(guard);
         data.getFilters().add(guard);
+        proxy.getFilters().add(guard);
         alive.getFilters().add(guard);
-        alive.getFilters().add(keepAlive);
+        closing.getFilters().add(guard);
         ui.getFilters().add(keepAlive);
         data.getFilters().add(keepAlive);
-        closing.getFilters().add(guard);
+        proxy.getFilters().add(keepAlive);
+        alive.getFilters().add(keepAlive);
+
 
         server.setExecutor(Executors.newCachedThreadPool());
         server.start();

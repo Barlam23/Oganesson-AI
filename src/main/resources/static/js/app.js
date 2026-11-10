@@ -6,7 +6,71 @@
 
 const DEFAULT_API_URL = "http://localhost:1234/v1/chat/completions";
 const DEFAULT_OLLAMA_URL = "http://localhost:11434/v1/chat/completions";
-const DEFAULT_HUE = 268;
+
+// External cloud providers. Requests go through the local /api/proxy so API keys never leave the machine
+// except toward the provider you chose, and so browser CORS is not an issue.
+const EXTERNAL_PROVIDERS = {
+    claude: {
+        label: 'Claude',
+        defaultUrl: 'https://api.anthropic.com/v1/messages',
+        needsUrl: false,
+        needsKey: true,
+        needsModel: true,
+        keyPlaceholder: 'sk-ant-api03-…',
+        modelPlaceholder: 'e.g., claude-sonnet-4-5',
+        hint: 'Claude needs an Anthropic API key and a model id. The endpoint is fixed (api.anthropic.com).',
+        format: 'anthropic'
+    },
+    openai: {
+        label: 'OpenAI',
+        defaultUrl: 'https://api.openai.com/v1/chat/completions',
+        needsUrl: false,
+        needsKey: true,
+        needsModel: true,
+        keyPlaceholder: 'sk-…',
+        modelPlaceholder: 'e.g., gpt-4o',
+        hint: 'OpenAI needs an API key and a model id. The endpoint is fixed (api.openai.com).',
+        format: 'openai'
+    },
+    deepseek: {
+        label: 'DeepSeek',
+        defaultUrl: 'https://api.deepseek.com/v1/chat/completions',
+        needsUrl: false,
+        needsKey: true,
+        needsModel: true,
+        keyPlaceholder: 'sk-…',
+        modelPlaceholder: 'e.g., deepseek-chat',
+        hint: 'DeepSeek needs an API key and a model id (deepseek-chat or deepseek-reasoner). The endpoint is fixed.',
+        format: 'openai'
+    },
+    openrouter: {
+        label: 'OpenRouter',
+        defaultUrl: 'https://openrouter.ai/api/v1/chat/completions',
+        needsUrl: false,
+        needsKey: true,
+        needsModel: true,
+        keyPlaceholder: 'sk-or-v1-…',
+        modelPlaceholder: 'e.g., anthropic/claude-3.5-sonnet',
+        hint: 'OpenRouter needs an API key and a model id in vendor/model form. The endpoint is fixed.',
+        format: 'openai'
+    },
+    other: {
+        label: 'Other',
+        defaultUrl: '',
+        needsUrl: true,
+        needsKey: true,   // shown; optional at save time
+        needsModel: true, // shown; optional at save time
+        requireKey: false,
+        requireModel: false,
+        keyPlaceholder: 'API key, if the server requires one',
+        modelPlaceholder: 'model id, if the server requires one',
+        hint: 'A custom OpenAI-compatible endpoint. URL is required. Key and model only if that server asks for them.',
+        format: 'openai'
+    }
+};
+const DEFAULT_EXTERNAL = 'claude';
+
+
 
 // Where each avatar picker lives in the page.
 const AVATAR_FIELDS = {
@@ -80,7 +144,19 @@ const app = {
     defaultServerError: "LM Studio server is not running!",
     data: {
         bots: [],
-        settings: { provider: 'lmstudio', lmStudioUrl: DEFAULT_API_URL, lmStudioModel: '', ollamaUrl: DEFAULT_OLLAMA_URL, ollamaModel: '', contextTokens: DEFAULT_CONTEXT_TOKENS },
+        settings: {
+            provider: 'lmstudio',
+            lmStudioUrl: DEFAULT_API_URL,
+            lmStudioModel: '',
+            ollamaUrl: DEFAULT_OLLAMA_URL,
+            ollamaModel: '',
+            externalProvider: DEFAULT_EXTERNAL,
+            externalUrl: '',
+            externalKey: '',
+            externalModel: '',
+            contextTokens: DEFAULT_CONTEXT_TOKENS
+        },
+
         userProfile: { name: "User", desc: "", gender: "", pronouns: "", avatar: "" },
         personas: [],
         activePersonaId: null
@@ -111,6 +187,11 @@ const app = {
     draftLength: DEFAULT_LENGTH,
     draftThinking: true,
     draftProvider: 'lmstudio',
+    navigationStack: [],
+    currentView: null,
+    navigatingBack: false,
+    viewContext: { botId: null, chatId: null },
+    draftExternalProvider: DEFAULT_EXTERNAL,
     providerDrafts: null,
     draftContext: DEFAULT_CONTEXT_TOKENS,
     chatEpochs: new WeakMap(),
@@ -120,8 +201,8 @@ const app = {
 
     /* ============================== startup ============================== */
 
-    // Closing the page closes the app. The server waits a few seconds before stopping, so a reload or another
-    // open tab can cancel the stop. Saves are written as each change happens, so nothing is lost.
+    // Closing the page closes the app, after a one-second pause on the server, so a reload or another open tab can cancel
+    // the stop. When this page closes it tells the other tabs, which answer so the server keeps running.
     bindPageLifecycle() {
         const presence = typeof BroadcastChannel === 'function' ? new BroadcastChannel('oganesson-presence') : null;
         if (presence) {
@@ -178,10 +259,9 @@ const app = {
             const logo = document.getElementById('brand-logo');
             const fallback = document.getElementById('brand-fallback');
             const favicon = document.getElementById('app-favicon');
-            if (logo) {
-                logo.src = LOGO_URL;
-                logo.classList.remove('hidden');
-            }
+            const frame = document.getElementById('brand-logo-frame');
+            if (logo) logo.src = LOGO_URL;
+            if (frame) frame.classList.remove('hidden');
             if (fallback && fallback.parentElement) fallback.parentElement.classList.add('hidden');
             if (favicon) favicon.href = LOGO_URL;
         };
@@ -217,6 +297,43 @@ const app = {
         });
         document.getElementById('setting-api-url').addEventListener('input', () => this.syncProviderDraftFromFields());
         document.getElementById('setting-model').addEventListener('input', () => this.syncProviderDraftFromFields());
+
+        const externalTrigger = document.getElementById('external-provider-trigger');
+        if (externalTrigger) {
+            externalTrigger.addEventListener('click', (event) => {
+                event.stopPropagation();
+                this.toggleExternalDropdown();
+            });
+        }
+        const externalMenu = document.getElementById('external-provider-menu');
+        if (externalMenu) {
+            externalMenu.addEventListener('click', (event) => {
+                const option = event.target.closest('[data-value]');
+                if (option) this.selectExternalProvider(option.dataset.value);
+            });
+        }
+        this._onExternalMenuFollow = () => {
+            const root = document.getElementById('external-provider-dropdown');
+            if (root && root.dataset.open === 'true') this.positionExternalMenu();
+        };
+        window.addEventListener('resize', this._onExternalMenuFollow);
+        const settingsView = document.getElementById('view-settings');
+        if (settingsView) settingsView.addEventListener('scroll', this._onExternalMenuFollow, { passive: true });
+        document.addEventListener('click', (event) => {
+            const root = document.getElementById('external-provider-dropdown');
+            const menu = document.getElementById('external-provider-menu');
+            if (!root || root.dataset.open !== 'true') return;
+            if (root.contains(event.target) || (menu && menu.contains(event.target))) return;
+            this.closeExternalDropdown();
+        });
+        document.addEventListener('keydown', (event) => {
+            if (event.key === 'Escape') this.closeExternalDropdown();
+        });
+        ['setting-external-url', 'setting-external-key', 'setting-external-model'].forEach((id) => {
+            const el = document.getElementById(id);
+            if (el) el.addEventListener('input', () => this.syncProviderDraftFromFields());
+        });
+
 
         const lengthGroup = document.getElementById('setting-length');
         lengthGroup.addEventListener('click', (event) => {
@@ -265,6 +382,7 @@ const app = {
         });
 
         document.getElementById('chat-messages').addEventListener('click', (event) => this.handleMessageAction(event));
+        this.bindAvatarViewer();
 
         const overviewSections = document.getElementById('overview-sections');
         if (overviewSections) {
@@ -322,14 +440,33 @@ const app = {
     // The saved provider decides the server, its endpoint, and its model name.
     providerConfig() {
         const s = this.data.settings;
-        if (s.provider === 'ollama') {
-            return { label: 'Ollama', url: (s.ollamaUrl || '').trim() || DEFAULT_OLLAMA_URL, model: (s.ollamaModel || '').trim() };
+        if (s.provider === 'external') {
+            const sub = EXTERNAL_PROVIDERS[s.externalProvider] ? s.externalProvider : DEFAULT_EXTERNAL;
+            const meta = EXTERNAL_PROVIDERS[sub];
+            const url = meta.needsUrl
+                ? ((s.externalUrl || '').trim() || meta.defaultUrl)
+                : meta.defaultUrl;
+            return {
+                label: meta.label,
+                url,
+                model: (s.externalModel || '').trim(),
+                apiKey: (s.externalKey || '').trim(),
+                external: true,
+                externalProvider: sub,
+                format: meta.format
+            };
         }
-        return { label: 'LM Studio', url: (s.lmStudioUrl || '').trim() || this.defaultApiUrl, model: (s.lmStudioModel || '').trim() };
+        if (s.provider === 'ollama') {
+            return { label: 'Ollama', url: (s.ollamaUrl || '').trim() || DEFAULT_OLLAMA_URL, model: (s.ollamaModel || '').trim(), external: false };
+        }
+        return { label: 'LM Studio', url: (s.lmStudioUrl || '').trim() || this.defaultApiUrl, model: (s.lmStudioModel || '').trim(), external: false };
     },
 
     currentEndpoint() {
-        return this.providerConfig().url;
+        const cfg = this.providerConfig();
+        // External calls go through the local proxy so CORS and API keys are handled on the server.
+        if (cfg.external) return '/api/proxy';
+        return cfg.url;
     },
 
     currentModel() {
@@ -338,8 +475,13 @@ const app = {
 
     async checkServerStatus() {
         if (!this.dataLoaded) return;
+        const cfg = this.providerConfig();
+        if (cfg.external) {
+            // Cloud providers are not "running" locally; skip the HEAD check.
+            return;
+        }
         try {
-            await fetch(this.currentEndpoint(), { method: 'HEAD', signal: AbortSignal.timeout(3000) });
+            await fetch(cfg.url, { method: 'HEAD', signal: AbortSignal.timeout(3000) });
         } catch (error) {
             this.showErrorNotification(`${this.serverName()} server is not running!`);
         }
@@ -348,6 +490,7 @@ const app = {
     serverName() {
         return this.providerConfig().label;
     },
+
 
     /* ============================ notification ============================ */
 
@@ -447,12 +590,31 @@ const app = {
 
             this.data = loaded;
             const rawSettings = loaded.settings || {};
-            this.data.settings = Object.assign({ provider: 'lmstudio', lmStudioUrl: this.defaultApiUrl, lmStudioModel: '', ollamaUrl: DEFAULT_OLLAMA_URL, ollamaModel: '', responseLength: DEFAULT_LENGTH, thinking: true, contextTokens: DEFAULT_CONTEXT_TOKENS }, rawSettings);
+            this.data.settings = Object.assign({
+                provider: 'lmstudio',
+                lmStudioUrl: this.defaultApiUrl,
+                lmStudioModel: '',
+                ollamaUrl: DEFAULT_OLLAMA_URL,
+                ollamaModel: '',
+                externalProvider: DEFAULT_EXTERNAL,
+                externalUrl: '',
+                externalKey: '',
+                externalModel: '',
+                responseLength: DEFAULT_LENGTH,
+                thinking: true,
+                contextTokens: DEFAULT_CONTEXT_TOKENS
+            }, rawSettings);
             if (!('provider' in rawSettings)) this.migrateLegacySettings(this.data.settings, rawSettings);
             delete this.data.settings.model;   // older single model name, now kept per server
-            if (this.data.settings.provider !== 'ollama') this.data.settings.provider = 'lmstudio';
+            if (this.data.settings.provider !== 'ollama' && this.data.settings.provider !== 'external') {
+                this.data.settings.provider = 'lmstudio';
+            }
+            if (!EXTERNAL_PROVIDERS[this.data.settings.externalProvider]) {
+                this.data.settings.externalProvider = DEFAULT_EXTERNAL;
+            }
             if (!(this.data.settings.lmStudioUrl || '').trim()) this.data.settings.lmStudioUrl = this.defaultApiUrl;
             if (!(this.data.settings.ollamaUrl || '').trim()) this.data.settings.ollamaUrl = DEFAULT_OLLAMA_URL;
+
             if (!RESPONSE_LENGTHS[this.data.settings.responseLength]) this.data.settings.responseLength = DEFAULT_LENGTH;
             this.data.settings.contextTokens = this.clampContextTokens(this.data.settings.contextTokens);
             if (typeof this.data.settings.thinking !== 'boolean') this.data.settings.thinking = true;
@@ -570,9 +732,21 @@ const app = {
 
     /* ============================== navigation ============================== */
 
-    navigateToView(viewId) {
+    // Records where the user came from, so Back can return there. Home is the root, so going home clears the trail.
+    // Going back itself is not recorded, which is what keeps the trail from growing as you return.
+    navigateToView(viewId, { remember = true, keepDraft = false } = {}) {
+        if (viewId === 'home') {
+            this.navigationStack = [];
+        } else if (remember && !this.navigatingBack && this.currentView && this.currentView !== viewId) {
+            // The context of the screen being left, as it was when that screen was shown.
+            this.navigationStack.push({ view: this.currentView, botId: this.viewContext.botId, chatId: this.viewContext.chatId });
+            if (this.navigationStack.length > 20) this.navigationStack.shift();
+        }
+        this.currentView = viewId;
+
         if (viewId !== 'chat' && this.editingMessage) this.cancelMessageEdit();
         if (this.isGenerating) this.abortResponseGeneration();
+        if (viewId !== 'settings' && this.closeExternalDropdown) this.closeExternalDropdown(true);
 
         document.querySelectorAll('.view').forEach(element => element.classList.add('hidden'));
         const target = document.getElementById('view-' + viewId);
@@ -585,7 +759,7 @@ const app = {
             this.currentBotId = null;
             this.renderCharacterGallery();
         } else if (viewId === 'create') {
-            this.clearCharacterForm();
+            if (!keepDraft) this.clearCharacterForm();
         } else if (viewId === 'user-profile') {
             this.renderUserProfile();
         } else if (viewId === 'settings') {
@@ -599,6 +773,201 @@ const app = {
         }
 
         this.autoGrowAll(target || document);
+
+        // Remember which character and chat this screen shows, for when the user comes back to it.
+        const shown = this.currentBotId ? this.data.bots.find(bot => bot.id === this.currentBotId) : null;
+        this.viewContext = { botId: this.currentBotId, chatId: shown ? shown.activeChatId : null };
+    },
+
+    // ----- character picture viewer -----
+    // It opens from the picture that was clicked and flies out to the centre, and closes back to it. Zoom is with the
+    // mouse wheel, a pinch, or a double-click. Only transforms are animated, so it stays smooth.
+    avatarViewerView() {
+        if (!this.avatarView) this.avatarView = { open: false, source: null, scale: 1, x: 0, y: 0, pointers: new Map(), pinchDistance: 0, dragLast: null };
+        return this.avatarView;
+    },
+
+    applyAvatarView() {
+        const view = this.avatarViewerView();
+        const zoom = document.getElementById('avatar-viewer-zoom');
+        const img = document.getElementById('avatar-viewer-img');
+        const stage = document.getElementById('avatar-viewer-stage');
+        if (!zoom || !img || !stage) return;
+        // Keep the picture from being dragged away from the screen: the room to move grows with the zoom.
+        const roomX = Math.max(0, (img.offsetWidth * view.scale - stage.clientWidth) / 2);
+        const roomY = Math.max(0, (img.offsetHeight * view.scale - stage.clientHeight) / 2);
+        view.x = Math.min(roomX, Math.max(-roomX, view.x));
+        view.y = Math.min(roomY, Math.max(-roomY, view.y));
+        zoom.style.transform = view.scale === 1 && !view.x && !view.y ? '' : `translate(${view.x}px, ${view.y}px) scale(${view.scale})`;
+        stage.classList.toggle('is-zoomed', view.scale > 1);
+    },
+
+    zoomAvatarAt(factor, clientX, clientY) {
+        const view = this.avatarViewerView();
+        const stage = document.getElementById('avatar-viewer-stage');
+        if (!stage) return;
+        const rect = stage.getBoundingClientRect();
+        const ox = clientX - (rect.left + rect.width / 2);
+        const oy = clientY - (rect.top + rect.height / 2);
+        const next = Math.min(6, Math.max(1, view.scale * factor));
+        const ratio = next / view.scale;
+        view.x = ox - (ox - view.x) * ratio;
+        view.y = oy - (oy - view.y) * ratio;
+        view.scale = next;
+        if (next === 1) { view.x = 0; view.y = 0; }
+        this.applyAvatarView();
+    },
+
+    openAvatarViewer(source) {
+        const viewer = document.getElementById('avatar-viewer');
+        const img = document.getElementById('avatar-viewer-img');
+        const zoom = document.getElementById('avatar-viewer-zoom');
+        if (!viewer || !img || !zoom || !source) return;
+        const view = this.avatarViewerView();
+        view.open = true;
+        view.source = source;
+        view.scale = 1; view.x = 0; view.y = 0;
+        img.src = source.src;
+        img.alt = 'Character picture';
+        this.applyAvatarView();
+
+        viewer.classList.remove('hidden');
+        void viewer.offsetWidth;   // so the backdrop transition starts from the hidden state
+        viewer.classList.add('is-open');
+
+        if (!this.prefersReducedMotion()) {
+            const from = source.getBoundingClientRect();
+            const to = zoom.getBoundingClientRect();
+            const dx = (from.left + from.width / 2) - (to.left + to.width / 2);
+            const dy = (from.top + from.height / 2) - (to.top + to.height / 2);
+            const scale = from.width / to.width;
+            zoom.animate([
+                { transform: `translate(${dx}px, ${dy}px) scale(${scale})`, opacity: 0.2 },
+                { transform: 'translate(0px, 0px) scale(1)', opacity: 1 }
+            ], { duration: 560, easing: 'cubic-bezier(0.16, 1, 0.3, 1)' });
+        }
+        document.getElementById('avatar-viewer-close').focus({ preventScroll: true });
+    },
+
+    closeAvatarViewer() {
+        const viewer = document.getElementById('avatar-viewer');
+        const zoom = document.getElementById('avatar-viewer-zoom');
+        if (!viewer || !zoom || viewer.classList.contains('hidden')) return;
+        const view = this.avatarViewerView();
+        if (!view.open) return;
+        view.open = false;
+        view.pointers.clear();
+        viewer.classList.remove('is-open');
+
+        const source = view.source;
+        const finish = () => { viewer.classList.add('hidden'); };
+        // Put the picture back to its normal size, measure where it should fly back to, then fly it there.
+        view.scale = 1; view.x = 0; view.y = 0;
+        zoom.style.transform = '';
+        if (this.prefersReducedMotion() || !source || !source.isConnected) {
+            finish();
+            return;
+        }
+        const from = zoom.getBoundingClientRect();
+        const to = source.getBoundingClientRect();
+        const dx = (to.left + to.width / 2) - (from.left + from.width / 2);
+        const dy = (to.top + to.height / 2) - (from.top + from.height / 2);
+        const scale = to.width / from.width;
+        zoom.animate([
+            { transform: 'translate(0px, 0px) scale(1)', opacity: 1 },
+            { transform: `translate(${dx}px, ${dy}px) scale(${scale})`, opacity: 0 }
+        ], { duration: 380, easing: 'cubic-bezier(0.4, 0, 1, 1)' }).onfinish = finish;
+    },
+
+    bindAvatarViewer() {
+        const stage = document.getElementById('avatar-viewer-stage');
+        const close = document.getElementById('avatar-viewer-close');
+        if (!stage || !close) return;
+        const view = this.avatarViewerView();
+        close.addEventListener('click', () => this.closeAvatarViewer());
+        document.addEventListener('keydown', (event) => {
+            if (event.key === 'Escape' && view.open) this.closeAvatarViewer();
+        });
+
+        stage.addEventListener('wheel', (event) => {
+            if (!view.open) return;
+            event.preventDefault();
+            this.zoomAvatarAt(Math.exp(-event.deltaY * 0.0015), event.clientX, event.clientY);
+        }, { passive: false });
+
+        stage.addEventListener('dblclick', (event) => {
+            if (!view.open) return;
+            if (view.scale > 1) {
+                view.scale = 1; view.x = 0; view.y = 0; this.applyAvatarView();
+            } else {
+                this.zoomAvatarAt(2.5, event.clientX, event.clientY);
+            }
+        });
+
+        stage.addEventListener('pointerdown', (event) => {
+            if (!view.open) return;
+            stage.setPointerCapture(event.pointerId);
+            view.pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+            if (view.pointers.size === 2) {
+                const [a, b] = [...view.pointers.values()];
+                view.pinchDistance = Math.hypot(a.x - b.x, a.y - b.y);
+                view.dragLast = null;
+            } else if (view.scale > 1) {
+                view.dragLast = { x: event.clientX, y: event.clientY };
+                stage.classList.add('is-dragging');
+            }
+        });
+
+        stage.addEventListener('pointermove', (event) => {
+            if (!view.open || !view.pointers.has(event.pointerId)) return;
+            view.pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+            if (view.pointers.size === 2) {
+                const [a, b] = [...view.pointers.values()];
+                const distance = Math.hypot(a.x - b.x, a.y - b.y);
+                if (view.pinchDistance > 0 && distance > 0) {
+                    this.zoomAvatarAt(distance / view.pinchDistance, (a.x + b.x) / 2, (a.y + b.y) / 2);
+                }
+                view.pinchDistance = distance;
+            } else if (view.dragLast && view.scale > 1) {
+                view.x += event.clientX - view.dragLast.x;
+                view.y += event.clientY - view.dragLast.y;
+                view.dragLast = { x: event.clientX, y: event.clientY };
+                this.applyAvatarView();
+            }
+        });
+
+        const release = (event) => {
+            view.pointers.delete(event.pointerId);
+            view.pinchDistance = 0;
+            if (view.pointers.size === 0) {
+                view.dragLast = null;
+                stage.classList.remove('is-dragging');
+            }
+        };
+        stage.addEventListener('pointerup', release);
+        stage.addEventListener('pointercancel', release);
+    },
+
+    // Returns to the previous screen, restoring the character and chat that were open there.
+    goBack() {
+        const entry = this.navigationStack.pop();
+        if (!entry) {
+            this.navigateToView('home');
+            return;
+        }
+        this.navigatingBack = true;
+        try {
+            if (entry.view === 'chat' && entry.botId) {
+                this.startChatSession(entry.botId, entry.chatId);
+            } else if (entry.view === 'overview' && entry.botId) {
+                this.openCharacterOverview(entry.botId);
+            } else {
+                if (entry.botId) this.currentBotId = entry.botId;
+                this.navigateToView(entry.view, { remember: false, keepDraft: entry.view === 'create' });
+            }
+        } finally {
+            this.navigatingBack = false;
+        }
     },
 
     /* ============================== helpers ============================== */
@@ -1030,6 +1399,7 @@ const app = {
         }
 
         this.persistApplicationData();
+        this.showSuccessNotification('Character saved successfully!');
         this.clearCharacterForm();
         this.openCharacterOverview(targetId);
     },
@@ -1058,6 +1428,7 @@ const app = {
         if (!ok) return;
         this.data.bots = this.data.bots.filter(bot => bot.id !== characterId);
         this.persistApplicationData();
+        this.showSuccessNotification('Character deleted successfully!');
         this.currentBotId = null;
         this.navigateToView('home');
     },
@@ -1866,10 +2237,6 @@ const app = {
         track.scrollBy({ left: direction * (track.clientWidth + gap), behavior: 'smooth' });
     },
 
-    greetingIndexOf(character, session) {
-        return Math.min(Math.max(Number.isInteger(session.greetingIndex) ? session.greetingIndex : 0, 0), character.firstmsgs.length - 1);
-    },
-
     // Selecting a card only marks it. The chat does not start until the user confirms with the green bubble.
     chooseGreeting(index) {
         const character = this.currentCharacter();
@@ -1948,7 +2315,7 @@ const app = {
         const tools = historyIndex === null ? '' : this.messageToolsHtml(isUser, historyIndex) + this.swipeHtml(msg);
 
         wrapperDiv.innerHTML = `
-            <img src="${this.escapeHtml(avatarUrl)}" alt="" class="msg-avatar ${isUser ? 'msg-persona-avatar' : ''} w-10 h-10 rounded-2xl object-cover flex-shrink-0 border border-violet-500/30 shadow-md">
+            <img src="${this.escapeHtml(avatarUrl)}" alt="" ${isUser ? '' : 'data-avatar-view title="View picture" '}class="msg-avatar ${isUser ? 'msg-persona-avatar' : 'msg-avatar-zoomable'} w-10 h-10 rounded-2xl object-cover flex-shrink-0 border border-violet-500/30 shadow-md">
             <div class="group relative max-w-[80%] min-w-0">
                 ${isUser ? '' : this.thinkingShellHtml()}
                 <div class="message-card ${isUser ? 'bg-[#7c3aed] text-[#ffffff]' : 'glass-panel text-gray-100'} px-5 py-3.5 rounded-3xl shadow-lg leading-relaxed text-sm">
@@ -1976,6 +2343,11 @@ const app = {
     },
 
     handleMessageAction(event) {
+        const picture = event.target.closest('img[data-avatar-view]');
+        if (picture) {
+            this.openAvatarViewer(picture);
+            return;
+        }
         const toggle = event.target.closest('[data-think-toggle]');
         if (toggle) {
             event.preventDefault();
@@ -2632,7 +3004,7 @@ const app = {
 
     requestCompletion(endpointUrl, controller, messages) {
         const thinking = this.thinkingEnabled();
-        const payload = {
+        let payload = {
             messages: messages,
             temperature: 0.8,
             top_p: 0.9,
@@ -2651,13 +3023,36 @@ const app = {
         payload.think = thinking;
         payload.chat_template_kwargs = { enable_thinking: thinking };
 
+        const headers = { 'Content-Type': 'application/json' };
+        const cfg = this.providerConfig();
+        if (cfg.external) {
+            // Online providers reject fields that only local servers understand (LM Studio, Ollama and llama.cpp
+            // switches), so only what each provider accepts is sent. OpenAI's newer models also reject sampling
+            // settings other than the defaults, and want max_completion_tokens instead of max_tokens.
+            const clean = { model: payload.model, messages: payload.messages, stream: true };
+            if (cfg.externalProvider === 'openai') {
+                clean.max_completion_tokens = payload.max_tokens;
+            } else {
+                clean.max_tokens = payload.max_tokens;
+                clean.temperature = payload.temperature;
+                clean.top_p = payload.top_p;
+            }
+            if (!clean.model) delete clean.model;
+            payload = clean;
+            // Local proxy receives the real target and credentials via headers; the body stays OpenAI-shaped.
+            headers['X-Target-Url'] = cfg.url;
+            headers['X-Provider'] = cfg.externalProvider || 'other';
+            if (cfg.apiKey) headers['X-Api-Key'] = cfg.apiKey;
+        }
+
         return fetch(endpointUrl, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers,
             signal: controller.signal,
             body: JSON.stringify(payload)
         });
     },
+
 
     /* ============================== streaming ============================== */
 
@@ -2693,8 +3088,12 @@ const app = {
             }
             return message;
         }
-        return '⚠️ Connection error to API endpoint (' + this.currentEndpoint() + ').';
+        const cfg = this.providerConfig();
+        // A local server that does not answer: it is simply not running.
+        if (!cfg.external) return '⚠️ ' + this.serverName() + ' server is not running!';
+        return '⚠️ Connection error to ' + cfg.label + ' via proxy.';
     },
+
 
     async streamModelResponse(character, activeSession, options = {}) {
         const regenerate = !!options.regenerate;
@@ -2893,15 +3292,44 @@ const app = {
     persistApiSettings() {
         this.syncProviderDraftFromFields();
         const drafts = this.providerDrafts;
-        if (!drafts[this.draftProvider].url.trim()) {
-            this.showErrorNotification('Please enter the local server endpoint URL.');
-            return;
+        const provider = this.draftProvider;
+
+        if (provider === 'external') {
+            const sub = this.draftExternalProvider;
+            const meta = EXTERNAL_PROVIDERS[sub] || EXTERNAL_PROVIDERS[DEFAULT_EXTERNAL];
+            const ext = drafts.external[sub] || { url: '', key: '', model: '' };
+            if (meta.needsUrl && !(ext.url || '').trim()) {
+                this.showErrorNotification('Please enter the endpoint URL for the external provider.');
+                return;
+            }
+            const requireKey = meta.requireKey !== false && meta.needsKey;
+            const requireModel = meta.requireModel !== false && meta.needsModel;
+            if (requireKey && !(ext.key || '').trim()) {
+                this.showErrorNotification('Please enter the API key for the external provider.');
+                return;
+            }
+            if (requireModel && !(ext.model || '').trim()) {
+                this.showErrorNotification('Please enter the model name for the external provider.');
+                return;
+            }
+
+            this.data.settings.provider = 'external';
+            this.data.settings.externalProvider = sub;
+            this.data.settings.externalUrl = (ext.url || '').trim();
+            this.data.settings.externalKey = (ext.key || '').trim();
+            this.data.settings.externalModel = (ext.model || '').trim();
+        } else {
+            if (!(drafts[provider] && drafts[provider].url.trim())) {
+                this.showErrorNotification('Please enter the local server endpoint URL.');
+                return;
+            }
+            this.data.settings.provider = provider;
+            this.data.settings.lmStudioUrl = drafts.lmstudio.url.trim() || this.defaultApiUrl;
+            this.data.settings.lmStudioModel = drafts.lmstudio.model.trim();
+            this.data.settings.ollamaUrl = drafts.ollama.url.trim() || DEFAULT_OLLAMA_URL;
+            this.data.settings.ollamaModel = drafts.ollama.model.trim();
         }
-        this.data.settings.provider = this.draftProvider;
-        this.data.settings.lmStudioUrl = drafts.lmstudio.url.trim() || this.defaultApiUrl;
-        this.data.settings.lmStudioModel = drafts.lmstudio.model.trim();
-        this.data.settings.ollamaUrl = drafts.ollama.url.trim() || DEFAULT_OLLAMA_URL;
-        this.data.settings.ollamaModel = drafts.ollama.model.trim();
+
         this.data.settings.responseLength = RESPONSE_LENGTHS[this.draftLength] ? this.draftLength : DEFAULT_LENGTH;
         this.data.settings.thinking = !!this.draftThinking;
         this.data.settings.contextTokens = this.clampContextTokens(this.draftContext);
@@ -2909,7 +3337,6 @@ const app = {
         this.persistApplicationData().then((saved) => {
             if (saved) {
                 this.showSuccessNotification('Settings saved successfully!');
-                this.checkServerStatus();
             } else {
                 this.showErrorNotification('Settings could not be saved. Please check the server and try again.');
             }
@@ -2956,33 +3383,63 @@ const app = {
         }
     },
 
-    // Each server keeps its own endpoint and model name while the tabs are used. Nothing is saved until Save Settings.
+    // Each server (and each external sub-provider) keeps its own fields while the tabs are used. Nothing is saved until Save Settings.
     loadProviderDrafts() {
         const s = this.data.settings;
+        const external = {};
+        Object.keys(EXTERNAL_PROVIDERS).forEach((key) => {
+            external[key] = { url: '', key: '', model: '' };
+        });
+        const savedSub = EXTERNAL_PROVIDERS[s.externalProvider] ? s.externalProvider : DEFAULT_EXTERNAL;
+        external[savedSub] = {
+            url: s.externalUrl || '',
+            key: s.externalKey || '',
+            model: s.externalModel || ''
+        };
         this.providerDrafts = {
             lmstudio: { url: s.lmStudioUrl || this.defaultApiUrl, model: s.lmStudioModel || '' },
-            ollama: { url: s.ollamaUrl || DEFAULT_OLLAMA_URL, model: s.ollamaModel || '' }
+            ollama: { url: s.ollamaUrl || DEFAULT_OLLAMA_URL, model: s.ollamaModel || '' },
+            external: external
         };
+        this.draftExternalProvider = savedSub;
     },
 
     syncProviderDraftFromFields() {
         if (!this.providerDrafts) this.loadProviderDrafts();
+        if (this.draftProvider === 'external') {
+            const sub = this.draftExternalProvider;
+            if (!this.providerDrafts.external[sub]) {
+                this.providerDrafts.external[sub] = { url: '', key: '', model: '' };
+            }
+            const draft = this.providerDrafts.external[sub];
+            draft.url = this.getFieldValue('setting-external-url');
+            draft.key = this.getFieldValue('setting-external-key');
+            draft.model = this.getFieldValue('setting-external-model');
+            return;
+        }
         const draft = this.providerDrafts[this.draftProvider];
+        if (!draft) return;
         draft.url = this.getFieldValue('setting-api-url');
         draft.model = this.getFieldValue('setting-model');
     },
 
     selectProviderTab(provider) {
+        if (this.closeExternalDropdown) this.closeExternalDropdown(true);
         this.syncProviderDraftFromFields();
         this.renderProviderSetting(provider);
     },
 
     renderProviderSetting(provider) {
         if (!this.providerDrafts) this.loadProviderDrafts();
-        this.draftProvider = provider === 'ollama' ? 'ollama' : 'lmstudio';
+        if (provider === 'external') this.draftProvider = 'external';
+        else if (provider === 'ollama') this.draftProvider = 'ollama';
+        else this.draftProvider = 'lmstudio';
 
         const track = document.querySelector('#provider-bubbles .provider-bubble-track');
-        if (track) track.dataset.provider = this.draftProvider;
+        if (track) {
+            track.dataset.provider = this.draftProvider;
+            track.dataset.count = '3';
+        }
 
         document.querySelectorAll('#provider-bubbles [data-provider]').forEach((bubble) => {
             const selected = bubble.dataset.provider === this.draftProvider;
@@ -2990,22 +3447,170 @@ const app = {
             bubble.tabIndex = selected ? 0 : -1;
         });
 
-        const draft = this.providerDrafts[this.draftProvider];
-        this.setFieldValue('setting-api-url', draft.url);
-        this.setFieldValue('setting-model', draft.model);
+        const localBlock = document.getElementById('settings-local-block');
+        const externalBlock = document.getElementById('settings-external-block');
+        const isExternal = this.draftProvider === 'external';
+        if (localBlock) localBlock.dataset.visible = isExternal ? 'false' : 'true';
+        if (externalBlock) externalBlock.dataset.visible = isExternal ? 'true' : 'false';
 
-        // LM Studio does not need a model name; Ollama does. Animate the field in/out smoothly.
-        const modelWrap = document.getElementById('setting-model-wrap');
-        if (modelWrap) {
-            const showModel = this.draftProvider === 'ollama';
-            modelWrap.dataset.visible = showModel ? 'true' : 'false';
-            const modelInput = document.getElementById('setting-model');
-            if (modelInput) {
-                modelInput.tabIndex = showModel ? 0 : -1;
-                modelInput.setAttribute('aria-hidden', showModel ? 'false' : 'true');
+        if (isExternal) {
+            this.renderExternalFields(this.draftExternalProvider);
+        } else {
+            const draft = this.providerDrafts[this.draftProvider];
+            this.setFieldValue('setting-api-url', draft.url);
+            this.setFieldValue('setting-model', draft.model);
+
+            // LM Studio does not need a model name; Ollama does. Animate the field in/out smoothly.
+            const modelWrap = document.getElementById('setting-model-wrap');
+            if (modelWrap) {
+                const showModel = this.draftProvider === 'ollama';
+                modelWrap.dataset.visible = showModel ? 'true' : 'false';
+                const modelInput = document.getElementById('setting-model');
+                if (modelInput) {
+                    modelInput.tabIndex = showModel ? 0 : -1;
+                    modelInput.setAttribute('aria-hidden', showModel ? 'false' : 'true');
+                }
             }
         }
     },
+
+    renderExternalFields(subProvider) {
+        if (!this.providerDrafts) this.loadProviderDrafts();
+        const sub = EXTERNAL_PROVIDERS[subProvider] ? subProvider : DEFAULT_EXTERNAL;
+        this.draftExternalProvider = sub;
+        const meta = EXTERNAL_PROVIDERS[sub];
+        if (!this.providerDrafts.external[sub]) {
+            this.providerDrafts.external[sub] = { url: '', key: '', model: '' };
+        }
+        const draft = this.providerDrafts.external[sub];
+
+        const valueEl = document.getElementById('external-provider-value');
+        if (valueEl) valueEl.textContent = meta.label;
+
+        document.querySelectorAll('#external-provider-menu [data-value]').forEach((option) => {
+            const selected = option.dataset.value === sub;
+            option.setAttribute('aria-selected', selected ? 'true' : 'false');
+        });
+
+        this.setFieldValue('setting-external-url', draft.url || meta.defaultUrl || '');
+        this.setFieldValue('setting-external-key', draft.key || '');
+        this.setFieldValue('setting-external-model', draft.model || '');
+
+        const modelInput = document.getElementById('setting-external-model');
+        const keyInput = document.getElementById('setting-external-key');
+        if (modelInput) modelInput.placeholder = meta.modelPlaceholder || 'model id';
+        if (keyInput) keyInput.placeholder = meta.keyPlaceholder || 'API key';
+
+        const keyLabel = document.getElementById('external-key-label');
+        const modelLabel = document.getElementById('external-model-label');
+        const optional = meta.requireKey === false;
+        if (keyLabel) keyLabel.textContent = optional ? 'API Key (optional)' : 'API Key';
+        if (modelLabel) modelLabel.textContent = meta.requireModel === false ? 'Model (optional)' : 'Model';
+
+        const hint = document.getElementById('external-provider-hint');
+        if (hint) {
+            hint.textContent = meta.hint || '';
+            hint.style.animation = 'none';
+            void hint.offsetWidth;
+            hint.style.animation = '';
+        }
+
+        const setVisible = (id, show) => {
+            const wrap = document.getElementById(id);
+            if (!wrap) return;
+            wrap.dataset.visible = show ? 'true' : 'false';
+            const input = wrap.querySelector('input');
+            if (input) {
+                input.tabIndex = show ? 0 : -1;
+                input.setAttribute('aria-hidden', show ? 'false' : 'true');
+            }
+        };
+        setVisible('external-url-wrap', !!meta.needsUrl);
+        setVisible('external-key-wrap', !!meta.needsKey);
+        setVisible('external-model-wrap', !!meta.needsModel);
+    },
+
+    selectExternalProvider(subProvider) {
+        this.syncProviderDraftFromFields();
+        this.renderExternalFields(subProvider);
+        this.closeExternalDropdown();
+    },
+
+    toggleExternalDropdown() {
+        const root = document.getElementById('external-provider-dropdown');
+        if (!root) return;
+        const open = root.dataset.open === 'true';
+        if (open) this.closeExternalDropdown();
+        else this.openExternalDropdown();
+    },
+
+    openExternalDropdown() {
+        const root = document.getElementById('external-provider-dropdown');
+        const menu = document.getElementById('external-provider-menu');
+        const trigger = document.getElementById('external-provider-trigger');
+        if (!root || !menu || !trigger) return;
+        this._dropdownGen = (this._dropdownGen || 0) + 1;
+        if (this._dropdownCloseTimer) {
+            clearTimeout(this._dropdownCloseTimer);
+            this._dropdownCloseTimer = null;
+        }
+        menu.classList.remove('is-closing');
+        if (menu.parentElement !== document.body) document.body.appendChild(menu);
+        menu.hidden = false;
+        root.dataset.open = 'true';
+        trigger.setAttribute('aria-expanded', 'true');
+        this.positionExternalMenu();
+        menu.style.animation = 'none';
+        void menu.offsetWidth;
+        menu.style.animation = '';
+    },
+
+    positionExternalMenu() {
+        const menu = document.getElementById('external-provider-menu');
+        const trigger = document.getElementById('external-provider-trigger');
+        if (!menu || !trigger || menu.hidden) return;
+        const rect = trigger.getBoundingClientRect();
+        const gap = 6;
+        const spaceBelow = Math.max(120, window.innerHeight - rect.bottom - gap - 12);
+        menu.style.left = Math.max(8, rect.left) + 'px';
+        menu.style.width = rect.width + 'px';
+        menu.style.top = (rect.bottom + gap) + 'px';
+        menu.style.maxHeight = Math.min(280, spaceBelow) + 'px';
+    },
+
+    closeExternalDropdown(instant) {
+        const root = document.getElementById('external-provider-dropdown');
+        const menu = document.getElementById('external-provider-menu');
+        const trigger = document.getElementById('external-provider-trigger');
+        if (!root || !menu || !trigger) return;
+        if (root.dataset.open !== 'true' && menu.hidden) return;
+        const gen = (this._dropdownGen = (this._dropdownGen || 0) + 1);
+        root.dataset.open = 'false';
+        trigger.setAttribute('aria-expanded', 'false');
+        const finish = () => {
+            if (gen !== this._dropdownGen) return;
+            if (this._dropdownCloseTimer) {
+                clearTimeout(this._dropdownCloseTimer);
+                this._dropdownCloseTimer = null;
+            }
+            menu.hidden = true;
+            menu.classList.remove('is-closing');
+            menu.removeEventListener('animationend', onEnd);
+        };
+        const onEnd = (event) => {
+            if (event.animationName !== 'dropdownOut') return;
+            finish();
+        };
+        const reduce = instant || window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        if (reduce || menu.hidden) {
+            finish();
+            return;
+        }
+        menu.classList.add('is-closing');
+        menu.addEventListener('animationend', onEnd);
+        this._dropdownCloseTimer = setTimeout(finish, 240);
+    },
+
 
     // Shows which option is selected (it is only saved when "Save Settings" is pressed).
     renderLengthSetting(key) {
@@ -3270,10 +3875,6 @@ const app = {
         }
         const thinking = split.thinking || (!split.answer && !!extra);
         return { reasoning, answer: split.answer, thinking };
-    },
-
-    stripReasoning(text) {
-        return this.splitReasoning(text).answer;
     }
 };
 

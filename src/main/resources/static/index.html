@@ -60,9 +60,11 @@
     <header class="glass-header px-4 sm:px-6 flex items-center justify-between shrink-0 z-20 relative gap-3">
         <div class="flex items-center gap-3.5 cursor-pointer group" onclick="app.navigateToView('home')">
             <div class="relative flex items-center justify-center">
-                <img id="brand-logo" src="" alt="" class="hidden w-10 h-10 object-contain group-hover:scale-105 transition duration-300" draggable="false">
+                <div id="brand-logo-frame" class="logo-frame hidden">
+                    <img id="brand-logo" src="" alt="" class="logo-image" draggable="false">
+                </div>
                 <div class="logo-glow-effect">
-                    <div id="brand-fallback" class="w-10 h-10 rounded-2xl bg-gradient-to-tr from-violet-600 via-fuchsia-500 to-rose-500 border border-white/30 flex items-center justify-center font-black text-xl text-white shadow-xl group-hover:scale-105 transition duration-300">
+                    <div id="brand-fallback" class="logo-frame bg-gradient-to-tr from-violet-600 via-fuchsia-500 to-rose-500 flex items-center justify-center font-black text-xl text-white">
                     O
                 </div>
                 </div>
@@ -248,9 +250,10 @@
                                 <div class="flex flex-col items-center sm:items-start gap-2 min-w-0 text-center sm:text-left">
                                     <input type="file" id="bot-avatar-file" accept="image/*" class="hidden" onchange="app.uploadAvatar(event, 'character')">
                                     <button type="button" onclick="document.getElementById('bot-avatar-file').click()" class="btn-upload md-btn md-tonal md-violet md-sm group">
-                                        <svg class="w-[18px] h-[18px]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path class="upload-icon" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v12m-4-4l4 4l4-4"></path>
-                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 17v1a2 2 0 002 2h12a2 2 0 002-2v-1"></path>
+                                        <svg class="w-[18px] h-[18px] image-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                                            <rect x="3" y="4" width="18" height="16" rx="2.5" stroke-width="2"></rect>
+                                            <circle class="image-sun" cx="8.5" cy="9.5" r="1.8" stroke-width="2"></circle>
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3.5 17l5.2-5.2a1.4 1.4 0 012 0L15 16.1l1.6-1.6a1.4 1.4 0 012 0l2.9 2.9"></path>
                                         </svg>
                                         Upload Image
                                     </button>
@@ -332,7 +335,7 @@
                         </button>
                     </div>
                     <div class="flex gap-3 ml-auto">
-                        <button type="button" onclick="app.navigateToView('home')" class="md-btn md-text md-neutral">Cancel</button>
+                        <button type="button" onclick="app.goBack()" class="md-btn md-text md-neutral">Cancel</button>
                         <button type="button" onclick="app.saveCharacter()" class="md-btn md-filled md-violet">Save Character</button>
                     </div>
                 </div>
@@ -393,7 +396,7 @@
                 </div>
 
                 <div class="pt-2 flex justify-end gap-3 border-t border-oganesson-800">
-                    <button type="button" onclick="app.navigateToView('home')" class="md-btn md-text md-neutral">Cancel</button>
+                    <button type="button" onclick="app.goBack()" class="md-btn md-text md-neutral">Cancel</button>
                     <button type="button" onclick="app.persistUserProfile()" class="md-btn md-filled md-indigo">Save personas</button>
                 </div>
             </div>
@@ -463,11 +466,11 @@
                     </button>
 
                     <button type="button" id="regenerate-btn" onclick="app.requestResponseRegeneration()" class="hidden md-icon-btn md-violet" title="Regenerate response">
-                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+                        <svg class="w-5 h-5 regen-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
                     </button>
 
                     <button type="submit" id="chat-send-btn" class="send-message-button md-icon-btn md-solid md-violet" title="Send message">
-                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"></path></svg>
+                        <svg class="w-5 h-5 send-plane" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"></path></svg>
                     </button>
 
                     <button type="button" id="edit-cancel-btn" onclick="app.cancelMessageEdit()" class="hidden md-icon-btn md-rose edit-action-btn" title="Cancel edit" aria-label="Cancel edit">
@@ -491,25 +494,82 @@
             <h2 class="text-3xl font-extrabold mb-6">Settings</h2>
             <div class="glass-panel p-6 rounded-3xl shadow-xl space-y-6">
                 <div>
-                    <label class="block text-xs font-bold text-violet-300 uppercase tracking-wider mb-2.5">Local model server</label>
-                    <div id="provider-bubbles" class="provider-bubbles" role="tablist" aria-label="Local model server">
-                        <div class="provider-bubble-track">
+                    <label class="block text-xs font-bold text-violet-300 uppercase tracking-wider mb-2.5">Model provider</label>
+                    <div id="provider-bubbles" class="provider-bubbles" role="tablist" aria-label="Model provider">
+                        <div class="provider-bubble-track" data-count="3">
                             <span id="provider-bubble-indicator" class="provider-bubble-indicator" aria-hidden="true"></span>
                             <button type="button" role="tab" aria-selected="false" data-provider="lmstudio" class="provider-bubble">LM Studio</button>
                             <button type="button" role="tab" aria-selected="false" data-provider="ollama" class="provider-bubble">Ollama</button>
+                            <button type="button" role="tab" aria-selected="false" data-provider="external" class="provider-bubble">External</button>
                         </div>
                     </div>
                 </div>
-                <div>
-                    <label class="block text-xs font-bold text-violet-300 uppercase tracking-wider mb-2">Local Server Endpoint URL</label>
-                    <input type="text" id="setting-api-url" class="w-full bg-oganesson-900 border border-oganesson-800 focus:border-violet-500 rounded-2xl p-3.5 text-white font-mono text-xs focus:outline-none transition" placeholder="e.g., http://localhost:1234/v1/chat/completions">
-                </div>
-                <div id="setting-model-wrap" class="setting-model-wrap" data-visible="false">
-                    <div class="setting-model-inner">
-                        <label class="block text-xs font-bold text-violet-300 uppercase tracking-wider mb-2">Model Name</label>
-                        <input type="text" id="setting-model" class="w-full bg-oganesson-900 border border-oganesson-800 focus:border-violet-500 rounded-2xl p-3.5 text-white font-mono text-xs focus:outline-none transition" placeholder="e.g., llama3.1:8b" autocomplete="off">
+
+                <!-- Local configuration (LM Studio / Ollama) -->
+                <div id="settings-local-block" class="settings-config-block" data-visible="true">
+                    <div class="settings-config-inner space-y-6">
+                        <div>
+                            <label class="block text-xs font-bold text-violet-300 uppercase tracking-wider mb-2">Local Server Endpoint URL</label>
+                            <input type="text" id="setting-api-url" class="w-full bg-oganesson-900 border border-oganesson-800 focus:border-violet-500 rounded-2xl p-3.5 text-white font-mono text-xs focus:outline-none transition" placeholder="e.g., http://localhost:1234/v1/chat/completions">
+                        </div>
+                        <div id="setting-model-wrap" class="setting-model-wrap" data-visible="false">
+                            <div class="setting-model-inner">
+                                <label class="block text-xs font-bold text-violet-300 uppercase tracking-wider mb-2">Model Name</label>
+                                <input type="text" id="setting-model" class="w-full bg-oganesson-900 border border-oganesson-800 focus:border-violet-500 rounded-2xl p-3.5 text-white font-mono text-xs focus:outline-none transition" placeholder="e.g., llama3.1:8b" autocomplete="off">
+                            </div>
+                        </div>
                     </div>
                 </div>
+
+                <!-- External configuration -->
+                <div id="settings-external-block" class="settings-config-block" data-visible="false">
+                    <div class="settings-config-inner space-y-5">
+                        <div id="external-privacy-warning" class="external-privacy-warning" role="alert">
+                            <svg class="w-5 h-5 shrink-0 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+                            <p class="text-xs leading-relaxed text-red-200/95"><strong class="font-bold text-red-100">Privacy warning:</strong> Messages, system prompts and character data are sent to the external provider you choose. They are subject to that provider’s privacy policy and terms. Prefer LM Studio or Ollama to keep everything on your machine.</p>
+                        </div>
+
+                        <div>
+                            <label id="external-provider-label" class="block text-xs font-bold text-violet-300 uppercase tracking-wider mb-2">External provider</label>
+                            <div id="external-provider-dropdown" class="md-dropdown" data-open="false">
+                                <button type="button" id="external-provider-trigger" class="md-dropdown-trigger" aria-haspopup="listbox" aria-expanded="false" aria-labelledby="external-provider-label">
+                                    <span id="external-provider-value" class="md-dropdown-value">Claude</span>
+                                    <svg class="md-dropdown-chevron w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+                                </button>
+                            </div>
+                            <p id="external-provider-hint" class="external-provider-hint"></p>
+                            <ul id="external-provider-menu" class="md-dropdown-menu" role="listbox" aria-labelledby="external-provider-label" hidden>
+                                <li role="option" tabindex="-1" data-value="claude" class="md-dropdown-option" aria-selected="true">Claude</li>
+                                <li role="option" tabindex="-1" data-value="openai" class="md-dropdown-option" aria-selected="false">OpenAI</li>
+                                <li role="option" tabindex="-1" data-value="deepseek" class="md-dropdown-option" aria-selected="false">DeepSeek</li>
+                                <li role="option" tabindex="-1" data-value="openrouter" class="md-dropdown-option" aria-selected="false">OpenRouter</li>
+                                <li role="option" tabindex="-1" data-value="other" class="md-dropdown-option" aria-selected="false">Other</li>
+                            </ul>
+                        </div>
+
+                        <div id="external-fields" class="space-y-5">
+                            <div id="external-url-wrap" class="setting-field-wrap" data-visible="false">
+                                <div class="setting-field-inner">
+                                    <label class="block text-xs font-bold text-violet-300 uppercase tracking-wider mb-2">Endpoint URL</label>
+                                    <input type="text" id="setting-external-url" class="w-full bg-oganesson-900 border border-oganesson-800 focus:border-violet-500 rounded-2xl p-3.5 text-white font-mono text-xs focus:outline-none transition" placeholder="https://api.example.com/v1/chat/completions" autocomplete="off">
+                                </div>
+                            </div>
+                            <div id="external-key-wrap" class="setting-field-wrap" data-visible="true">
+                                <div class="setting-field-inner">
+                                    <label id="external-key-label" class="block text-xs font-bold text-violet-300 uppercase tracking-wider mb-2">API Key</label>
+                                    <input type="password" id="setting-external-key" class="w-full bg-oganesson-900 border border-oganesson-800 focus:border-violet-500 rounded-2xl p-3.5 text-white font-mono text-xs focus:outline-none transition" placeholder="sk-ant-api03-…" autocomplete="off">
+                                </div>
+                            </div>
+                            <div id="external-model-wrap" class="setting-field-wrap" data-visible="true">
+                                <div class="setting-field-inner">
+                                    <label id="external-model-label" class="block text-xs font-bold text-violet-300 uppercase tracking-wider mb-2">Model</label>
+                                    <input type="text" id="setting-external-model" class="w-full bg-oganesson-900 border border-oganesson-800 focus:border-violet-500 rounded-2xl p-3.5 text-white font-mono text-xs focus:outline-none transition" placeholder="e.g., claude-sonnet-4-5" autocomplete="off">
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
                 <div>
                     <label id="setting-length-label" class="block text-xs font-bold text-violet-300 uppercase tracking-wider mb-2">Response Length</label>
                     <div id="setting-length" class="md-segmented" role="radiogroup" aria-labelledby="setting-length-label">
@@ -551,7 +611,7 @@
                     <button type="button" onclick="app.downloadBackup()" class="md-btn md-tonal md-emerald md-sm">Download backup</button>
                 </div>
                 <div class="pt-4 flex justify-end gap-3">
-                    <button type="button" onclick="app.navigateToView('home')" class="md-btn md-text md-neutral">Back</button>
+                    <button type="button" onclick="app.goBack()" class="md-btn md-text md-neutral">Back</button>
                     <button onclick="app.persistApiSettings()" class="md-btn md-filled md-violet">Save Settings</button>
                 </div>
             </div>
@@ -662,6 +722,18 @@
             <div class="flex justify-end gap-3 mt-6">
                 <button type="button" id="confirm-cancel" class="md-btn md-text md-neutral">Cancel</button>
                 <button type="button" id="confirm-ok" class="md-btn md-filled md-rose">Delete</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="avatar-viewer" class="avatar-viewer hidden" role="dialog" aria-modal="true" aria-label="Character picture">
+        <div class="avatar-viewer-backdrop"></div>
+        <button type="button" id="avatar-viewer-close" class="avatar-viewer-close" aria-label="Close picture" title="Close">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.4" d="M6 6l12 12M18 6L6 18"></path></svg>
+        </button>
+        <div id="avatar-viewer-stage" class="avatar-viewer-stage">
+            <div id="avatar-viewer-zoom" class="avatar-viewer-zoom">
+                <img id="avatar-viewer-img" class="avatar-viewer-img" alt="" draggable="false">
             </div>
         </div>
     </div>

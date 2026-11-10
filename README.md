@@ -5,12 +5,14 @@ model that runs on your own computer. Everything stays on your machine.
 
 ## Requirements
 
-Oganesson AI does not include a language model. Install one of these and keep it running on your computer:
+Oganesson AI does not include a language model. Use a local server or an external API:
 
 - **LM Studio** (https://lmstudio.ai): load a model and keep the default endpoint.
 - **Ollama** (https://ollama.com): pull a model, then use the Ollama endpoint in Settings (see *Connect a model*).
+- **External providers** (Claude, OpenAI, DeepSeek, OpenRouter, or any OpenAI-compatible endpoint): API key and model in Settings. Messages leave your computer — see *Privacy*.
 
-Any other server with an OpenAI-compatible chat endpoint also works.
+Any other local server with an OpenAI-compatible chat endpoint also works under LM Studio / Ollama / Other.
+
 
 Set the context length to **10,240 tokens** in LM Studio (model settings, *Context Length*) or Ollama (the
 `OLLAMA_CONTEXT_LENGTH` environment variable). This is enough for the default **Chat memory** setting and the **Novel** response length. If you change
@@ -25,9 +27,13 @@ telemetry, no crash reports and no advertising.
 - Your characters, chats, settings and profile are stored only on your computer.
 - The app runs a small server that listens only on your own machine. Nothing on your network can reach it.
 - The only network traffic is between the app and the model server you configure. By default that server runs on
-  your computer, so nothing leaves it. If you point the app at a cloud service, your messages go to that service,
-  under its own privacy policy.
-- Avatars are generated locally. The Discord button opens a link in your browser only when you click it.
+  your computer (LM Studio or Ollama), so nothing leaves it.
+- **External providers** (Claude, OpenAI, DeepSeek, OpenRouter, or a custom endpoint): when you choose External in
+  Settings, chat messages, system prompts and character personality/scenario text are sent to that provider through
+  a local proxy. API keys are stored only in your local data file and are forwarded solely to the endpoint you set.
+  Those providers process your content under *their* privacy policies and terms of service. Prefer LM Studio or
+  Ollama if you want everything to stay offline.
+
 
 ## Download
 
@@ -61,15 +67,20 @@ The app opens at http://localhost:6677. Add `--no-browser` to skip opening the b
 
 ## Connect a model
 
-Open **Settings** and choose **LM Studio** or **Ollama** at the top. Each tab has its own endpoint and model name,
-and the one you choose is used when you press **Save Settings**. The LM Studio endpoint is
-`http://localhost:1234/v1/chat/completions` and the Ollama endpoint is `http://localhost:11434/v1/chat/completions`.
+Open **Settings** and choose **LM Studio**, **Ollama**, or **External** at the top. Each option keeps its own
+fields, and the one you choose is used when you press **Save Settings**.
 
-- **LM Studio:** keep the default endpoint and load a model in LM Studio. The app uses whichever model is loaded.
-- **Ollama:** fill in **Model Name** with the model you have pulled.
-- **Other servers** (llama.cpp and similar): use their OpenAI-compatible chat endpoint.
+- **LM Studio:** keep the default endpoint (`http://localhost:1234/v1/chat/completions`) and load a model in LM
+  Studio. The app uses whichever model is loaded.
+- **Ollama:** use `http://localhost:11434/v1/chat/completions` and fill in **Model Name** with the model you have
+  pulled.
+- **External:** pick Claude, OpenAI, DeepSeek, OpenRouter, or Other. Enter the API key and model the provider
+  requires (and an endpoint URL for Other). Messages leave your machine and are subject to that provider’s privacy
+  policy — a red warning in Settings reminds you of this. Requests go through a local proxy so the browser never
+  talks to the cloud directly.
 
 The **Thinking** switch asks reasoning models to think before they answer. Servers that do not support it ignore it.
+
 
 ## Characters
 

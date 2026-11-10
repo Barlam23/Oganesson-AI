@@ -44,16 +44,6 @@ body {
     transform: translateY(-4px) scale(1.012);
 }
 
-.floating-action-button {
-    background: linear-gradient(135deg, #8b5cf6 0%, #ec4899 50%, #f43f5e 100%);
-    box-shadow: 0 10px 25px -5px rgba(236, 72, 153, 0.5), 0 0 20px rgba(139, 92, 246, 0.4);
-    transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
-}
-.floating-action-button:hover {
-    transform: scale(1.1) rotate(90deg);
-    box-shadow: 0 15px 35px -5px rgba(236, 72, 153, 0.7), 0 0 30px rgba(139, 92, 246, 0.6);
-}
-
 @keyframes hueRotate {
     0% { filter: drop-shadow(0 0 12px rgba(139, 92, 246, 0.8)) hue-rotate(0deg); }
     50% { filter: drop-shadow(0 0 18px rgba(244, 63, 94, 0.9)) hue-rotate(180deg); }
@@ -165,8 +155,7 @@ body {
 .navigation-home-icon {
     transition: transform 0.3s ease;
 }
-.group:hover .navigation-home-icon,
-.btn-home:hover .navigation-home-icon {
+.group:hover .navigation-home-icon {
     transform: translateY(-2px);
 }
 
@@ -174,11 +163,31 @@ body {
     transition: all 0.25s ease;
 }
 .send-message-button:hover {
-    transform: scale(1.08) rotate(-8deg);
+    transform: scale(1.08);
     box-shadow: 0 0 18px rgba(139, 92, 246, 0.6);
 }
 .send-message-button:active {
     transform: scale(0.95);
+}
+
+/* Regenerate: the icon turns a half circle on hover, and turns back smoothly when the pointer leaves */
+.regen-icon { transform-origin: 50% 50%; transition: transform 0.55s cubic-bezier(0.34, 1.3, 0.64, 1); }
+#regenerate-btn:hover .regen-icon { transform: rotate(-180deg); }   /* negative = counterclockwise */
+
+/* Send: the paper plane flies straight up out of the top of the button, and comes back straight up from behind its
+   bottom edge. The round button clips it, so it looks as if it is hidden behind the button. The glow on hover stays. */
+.send-plane { transform-origin: 50% 50%; }
+.send-message-button:hover .send-plane { animation: planeFly 0.8s linear; }
+@keyframes planeFly {
+    0%   { transform: translate(0, 0); animation-timing-function: cubic-bezier(0.55, 0, 1, 0.45); }
+    42%  { transform: translate(0, -30px); animation-timing-function: step-end; }
+    42.01% { transform: translate(0, 30px); animation-timing-function: cubic-bezier(0, 0.55, 0.45, 1); }
+    100% { transform: translate(0, 0); }
+}
+@media (prefers-reduced-motion: reduce) {
+    .regen-icon { transition: none; }
+    #regenerate-btn:hover .regen-icon { transform: none; }
+    .send-message-button:hover .send-plane { animation: none; }
 }
 
 @keyframes notificationSlideDown {
@@ -221,7 +230,6 @@ body {
 
 .md-filled   { --c: #ffffff; --bg: var(--solid); }
 .md-tonal    { --c: var(--tc); --bg: var(--tb); }
-.md-outlined { --c: var(--tc); --bg: transparent; border-color: rgba(255, 255, 255, 0.2) !important; }
 .md-text     { --c: var(--tc); --bg: transparent; }
 .md-solid    { --c: #ffffff; --bg: var(--solid); }
 
@@ -319,8 +327,6 @@ body {
     .md-btn.md-sm:has(> .btn-label) { padding: 0; width: 34px; }
     .md-btn.md-sm:has(> .btn-label) > svg { margin: 0; }
 }
-
-.floating-action-button { border-radius: 20px; }
 
 .md-chip {
     display: inline-flex;
@@ -455,11 +461,14 @@ body {
     background: #0a0f17;
     transition: border-color 0.3s ease, box-shadow 0.3s ease;
 }
+
+/* In the character overview the greetings are only read, so their green glow stays on (it does not depend on focus). */
+.overview-greetings { --gc: #10b981; }
+.overview-greetings .gtab.active { box-shadow: 0 -5px 14px -6px rgba(16, 185, 129, 0.4); }
+.overview-greetings .gbody { box-shadow: 0 6px 16px -4px rgba(16, 185, 129, 0.25); }
 .greetings-wrapper:focus-within .gbody { box-shadow: 0 6px 16px -4px rgba(16, 185, 129, 0.25); }
 
 .message-body { user-select: text; }
-.brand-logo-img { image-rendering: auto; }
-
 @media (prefers-reduced-motion: reduce) {
     .md-ripple { display: none; }
     .md-btn, .md-icon-btn { transition: none; }
@@ -865,6 +874,9 @@ button.md-btn.create-pill:hover::after { transform: translateX(120%); }
     border: 1px solid rgba(255, 255, 255, 0.2);
     box-shadow: 0 0 0 1px rgba(139, 92, 246, 0.08), 0 0 22px rgba(139, 92, 246, 0.12), 0 8px 24px rgba(0, 0, 0, 0.35);
 }
+.provider-bubble-track[data-count="3"] {
+    grid-template-columns: 1fr 1fr 1fr;
+}
 
 .provider-bubble-indicator {
     position: absolute;
@@ -877,17 +889,26 @@ button.md-btn.create-pill:hover::after { transform: translateX(120%); }
     box-shadow: 0 10px 25px -6px rgba(236, 72, 153, 0.5), 0 0 18px rgba(139, 92, 246, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.28);
     pointer-events: none;
     transform: translateX(0);
-    transition: transform 0.42s cubic-bezier(0.34, 1.3, 0.64, 1), box-shadow 0.3s ease;
+    transition: transform 0.42s cubic-bezier(0.34, 1.3, 0.64, 1), width 0.42s cubic-bezier(0.34, 1.3, 0.64, 1), box-shadow 0.3s ease;
+}
+.provider-bubble-track[data-count="3"] .provider-bubble-indicator {
+    width: calc(33.333% - 4px);
 }
 .provider-bubble-track[data-provider="ollama"] .provider-bubble-indicator {
     transform: translateX(100%);
+}
+.provider-bubble-track[data-count="3"][data-provider="ollama"] .provider-bubble-indicator {
+    transform: translateX(100%);
+}
+.provider-bubble-track[data-count="3"][data-provider="external"] .provider-bubble-indicator {
+    transform: translateX(200%);
 }
 
 .provider-bubble {
     position: relative;
     z-index: 1;
     height: 40px;
-    padding: 0 16px;
+    padding: 0 12px;
     border: 0;
     border-radius: 9999px;
     background: transparent;
@@ -907,26 +928,30 @@ button.md-btn.create-pill:hover::after { transform: translateX(120%); }
 /* Settings never shifts sideways when the page gets a scrollbar (e.g. after choosing Ollama and its model field appears). */
 .view { scrollbar-gutter: stable both-edges; }
 
-/* Model name field: fade + slide so it never pops in or collapses abruptly */
-.setting-model-wrap {
+/* Animated show/hide for local vs external config blocks and individual fields */
+.settings-config-block,
+.setting-model-wrap,
+.setting-field-wrap {
     display: grid;
     grid-template-rows: 1fr;
     opacity: 1;
     transform: translateY(0);
     transition:
-        grid-template-rows 0.36s cubic-bezier(0.22, 1, 0.36, 1),
-        opacity 0.28s ease,
-        transform 0.36s cubic-bezier(0.22, 1, 0.36, 1),
-        margin 0.36s cubic-bezier(0.22, 1, 0.36, 1);
+        grid-template-rows 0.38s cubic-bezier(0.22, 1, 0.36, 1),
+        opacity 0.3s ease,
+        transform 0.38s cubic-bezier(0.22, 1, 0.36, 1),
+        margin 0.38s cubic-bezier(0.22, 1, 0.36, 1);
     overflow: hidden;
 }
-
-.setting-model-inner {
+.settings-config-inner,
+.setting-model-inner,
+.setting-field-inner {
     min-height: 0;
     overflow: hidden;
 }
-
-.setting-model-wrap[data-visible="false"] {
+.settings-config-block[data-visible="false"],
+.setting-model-wrap[data-visible="false"],
+.setting-field-wrap[data-visible="false"] {
     grid-template-rows: 0fr;
     opacity: 0;
     transform: translateY(-10px);
@@ -935,13 +960,240 @@ button.md-btn.create-pill:hover::after { transform: translateX(120%); }
     pointer-events: none;
 }
 
+/* Red privacy warning for external mode */
+.external-privacy-warning {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.75rem;
+    padding: 0.9rem 1rem;
+    border-radius: 1rem;
+    background: rgba(127, 29, 29, 0.35);
+    border: 1px solid rgba(248, 113, 113, 0.45);
+    box-shadow: 0 0 0 1px rgba(239, 68, 68, 0.08), 0 8px 24px rgba(127, 29, 29, 0.2);
+    animation: warningIn 0.4s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+@keyframes warningIn {
+    from { opacity: 0; transform: translateY(-6px) scale(0.98); }
+    to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+/* Material You–style dropdown */
+.md-dropdown {
+    position: relative;
+    width: 100%;
+}
+.md-dropdown-trigger {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    height: 48px;
+    padding: 0 1rem;
+    border-radius: 1rem;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    background: #0e121e;
+    color: #f3f4f6;
+    font-family: inherit;
+    font-size: 0.875rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: border-color 0.2s ease, box-shadow 0.25s ease, background 0.2s ease;
+}
+.md-dropdown-trigger:hover {
+    border-color: rgba(167, 139, 250, 0.45);
+    background: #121625;
+}
+.md-dropdown[data-open="true"] .md-dropdown-trigger {
+    border-color: #a78bfa;
+    box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.22);
+}
+.md-dropdown-value { flex: 1; text-align: left; }
+.md-dropdown-chevron {
+    flex-shrink: 0;
+    color: #a78bfa;
+    transition: transform 0.28s cubic-bezier(0.34, 1.3, 0.64, 1);
+}
+.md-dropdown[data-open="true"] .md-dropdown-chevron {
+    transform: rotate(180deg);
+}
+.external-provider-hint {
+    margin-top: 0.55rem;
+    font-size: 11px;
+    line-height: 1.45;
+    color: #9ca3af;
+    min-height: 2.6em;
+    animation: hintIn 0.28s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+@keyframes hintIn {
+    from { opacity: 0; transform: translateY(-4px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+.md-dropdown-menu {
+    position: fixed;
+    z-index: 80;
+    margin: 0;
+    padding: 6px;
+    list-style: none;
+    border-radius: 1rem;
+    background: #141a2a;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(139, 92, 246, 0.1);
+    transform-origin: top center;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    animation: dropdownIn 0.24s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.md-dropdown-menu.is-closing {
+    animation: dropdownOut 0.18s cubic-bezier(0.4, 0, 0.2, 1) both;
+    pointer-events: none;
+}
+@keyframes dropdownIn {
+    from { opacity: 0; transform: translateY(-10px) scale(0.97); }
+    to { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes dropdownOut {
+    from { opacity: 1; transform: translateY(0) scale(1); }
+    to { opacity: 0; transform: translateY(-8px) scale(0.97); }
+}
+.md-dropdown-option {
+    display: flex;
+    align-items: center;
+    min-height: 40px;
+    padding: 0 0.85rem;
+    border-radius: 0.75rem;
+    color: #e5e7eb;
+    font-size: 0.875rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease;
+}
+.md-dropdown-option:hover,
+.md-dropdown-option:focus-visible {
+    background: rgba(139, 92, 246, 0.18);
+    color: #fff;
+    outline: none;
+}
+.md-dropdown-option[aria-selected="true"] {
+    background: linear-gradient(135deg, rgba(139, 92, 246, 0.35) 0%, rgba(236, 72, 153, 0.25) 100%);
+    color: #fff;
+}
+
 @media (prefers-reduced-motion: reduce) {
     .provider-bubble-indicator {
         transition: none;
     }
-    .setting-model-wrap {
+    .settings-config-block,
+    .setting-model-wrap,
+    .setting-field-wrap {
         transition: none;
     }
+    .external-privacy-warning,
+    .external-provider-hint,
+    .md-dropdown-menu,
+    .md-dropdown-menu.is-closing {
+        animation: none;
+    }
+    .md-dropdown-chevron {
+        transition: none;
+    }
+}
+
+
+/* Upload Image button on the character form: the picture frame lifts and tilts, and the sun settles into place on hover */
+.image-icon { transition: transform 0.35s cubic-bezier(0.34, 1.56, 0.64, 1); transform-origin: 50% 60%; }
+.image-sun { transition: transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1); transform-origin: 8.5px 9.5px; }
+.btn-upload:hover .image-icon { transform: translateY(-2px) rotate(-6deg) scale(1.08); }
+.btn-upload:hover .image-sun { transform: translate(1.2px, -1.2px) scale(1.15); }
+@media (prefers-reduced-motion: reduce) {
+    .image-icon, .image-sun { transition: none; }
+    .btn-upload:hover .image-icon, .btn-upload:hover .image-sun { transform: none; }
+}
+
+/* ===== header logo: a rounded square that enlarges on hover, with no delay ===== */
+.logo-frame {
+    width: 40px;
+    height: 40px;
+    border-radius: 16px;
+    overflow: hidden;
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    box-shadow: 0 10px 25px -6px rgba(139, 92, 246, 0.35);
+    transition: transform 0.45s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.3s ease;
+    will-change: transform;
+}
+.logo-image { width: 100%; height: 100%; object-fit: cover; display: block; }
+.group:hover .logo-frame,
+.group:focus-visible .logo-frame { transform: scale(1.12); box-shadow: 0 14px 30px -6px rgba(236, 72, 153, 0.45); }
+
+/* ===== chat: a character's picture opens a zoomable viewer ===== */
+.msg-avatar-zoomable { cursor: zoom-in; transition: transform 0.35s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.3s ease; }
+.msg-avatar-zoomable:hover { transform: scale(1.08); box-shadow: 0 0 18px rgba(139, 92, 246, 0.5); }
+
+.avatar-viewer { position: fixed; inset: 0; z-index: 95; }
+.avatar-viewer:not(.hidden) { display: block; }
+.avatar-viewer-backdrop {
+    position: absolute;
+    inset: 0;
+    background: rgba(5, 6, 12, 0.6);
+    opacity: 0;
+    backdrop-filter: blur(0px);
+    -webkit-backdrop-filter: blur(0px);
+    transition: opacity 0.45s ease, backdrop-filter 0.45s ease, -webkit-backdrop-filter 0.45s ease;
+}
+.avatar-viewer.is-open .avatar-viewer-backdrop {
+    opacity: 1;
+    backdrop-filter: blur(16px) saturate(140%);
+    -webkit-backdrop-filter: blur(16px) saturate(140%);
+}
+.avatar-viewer-stage {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    touch-action: none;
+    cursor: zoom-in;
+    user-select: none;
+}
+.avatar-viewer-stage.is-zoomed { cursor: grab; }
+.avatar-viewer-stage.is-dragging { cursor: grabbing; }
+.avatar-viewer-zoom { will-change: transform; transform-origin: center center; }
+.avatar-viewer-img {
+    display: block;
+    max-width: min(82vh, 88vw);
+    max-height: 82vh;
+    width: auto;
+    height: auto;
+    border-radius: 28px;
+    border: 1px solid rgba(255, 255, 255, 0.25);
+    box-shadow: 0 30px 80px -20px rgba(139, 92, 246, 0.5), 0 0 60px rgba(236, 72, 153, 0.22);
+    pointer-events: none;
+    -webkit-user-drag: none;
+}
+.avatar-viewer-close {
+    position: absolute;
+    top: 18px;
+    right: 18px;
+    z-index: 2;
+    display: grid;
+    place-items: center;
+    width: 44px;
+    height: 44px;
+    border-radius: 9999px;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    background: rgba(14, 18, 30, 0.75);
+    color: #ffffff;
+    cursor: pointer;
+    transition: transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1), background-color 0.2s ease, box-shadow 0.3s ease;
+}
+.avatar-viewer-close svg { width: 20px; height: 20px; }
+.avatar-viewer-close:hover { transform: rotate(90deg) scale(1.08); background: rgba(139, 92, 246, 0.35); box-shadow: 0 0 18px rgba(139, 92, 246, 0.5); }
+.avatar-viewer-close:focus-visible { outline: 2px solid #a78bfa; outline-offset: 3px; }
+
+@media (prefers-reduced-motion: reduce) {
+    .logo-frame, .msg-avatar-zoomable, .avatar-viewer-backdrop, .avatar-viewer-close { transition: none; }
+    .group:hover .logo-frame, .msg-avatar-zoomable:hover, .avatar-viewer-close:hover { transform: none; }
 }
 
 /* ===== reply versions: < 1/3 > under a regenerated message ===== */
@@ -980,10 +1232,6 @@ button.md-btn.create-pill:hover::after { transform: translateX(120%); }
 .swipe-btn:disabled { opacity: 0.3; cursor: default; }
 
 /* ===== sending a message ===== */
-@keyframes msgSendIn {
-    0% { opacity: 0; transform: translate(22px, 14px) scale(0.9); }
-    100% { opacity: 1; transform: translate(0, 0) scale(1); }
-}
 .msg-send-in {
     animation: msgSendFancy 0.48s cubic-bezier(0.16, 1, 0.3, 1) both;
     transform-origin: bottom right;
