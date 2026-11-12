@@ -20,3 +20,8 @@
 - Reworked header logo and composer animations (regenerate and send).
 - The server-not-running message now appears only at startup and when a message can't be sent.
 - The app now stops about one second after the last tab closes.
+
+## v1.2.1
+
+- Code cleanup
+- fix local-host check in proxy
