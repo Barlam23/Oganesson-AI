@@ -41,6 +41,7 @@ public class ProxyHandler implements HttpHandler {
             "\"type\"\\s*:\\s*\"text_delta\"[^}]*\"text\"\\s*:\\s*\"((?:\\\\.|[^\"\\\\])*)\"");
     private static final Pattern ANTHROPIC_ERROR = Pattern.compile(
             "\"message\"\\s*:\\s*\"((?:\\\\.|[^\"\\\\])*)\"");
+    private static final Pattern IPV4_LITERAL = Pattern.compile("^(\\d+)\\.(\\d+)\\.(\\d+)\\.(\\d+)$");
 
     @Override
     public void handle(HttpExchange exchange) throws IOException {
@@ -290,8 +291,12 @@ public class ProxyHandler implements HttpHandler {
         if (h.startsWith("[") && h.endsWith("]")) h = h.substring(1, h.length() - 1);
         if (h.equals("localhost") || h.endsWith(".localhost") || h.endsWith(".local") || h.equals("::1")) return true;
         if (!h.contains(".") && !h.contains(":")) return true;   // a single name on the local network
-        Matcher v4 = Pattern.compile("^(\\d+)\\.(\\d+)\\.(\\d+)\\.(\\d+)$").matcher(h);
-        if (!v4.matches()) return h.startsWith("fc") || h.startsWith("fd") || h.startsWith("fe80");
+        Matcher v4 = IPV4_LITERAL.matcher(h);
+        if (!v4.matches()) {
+            // Only IPv6 literals (which contain a colon) can be unique-local addresses. A DNS name such as
+            // "fcdn.example.com" is public and must not be treated as local, or an API key could go out over http.
+            return h.contains(":") && (h.startsWith("fc") || h.startsWith("fd") || h.startsWith("fe80"));
+        }
         int a = Integer.parseInt(v4.group(1)), b = Integer.parseInt(v4.group(2));
         return a == 127 || a == 10 || (a == 172 && b >= 16 && b <= 31) || (a == 192 && b == 168) || (a == 169 && b == 254);
     }
